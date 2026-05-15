@@ -1,0 +1,10 @@
+version: '3.8'
+services:
+  api:
+    build: ./backend/api
+    ports:
+      - "3000:3000"
+  ml:
+    build: ./backend/ml
+    ports:
+      - "8001:8001"

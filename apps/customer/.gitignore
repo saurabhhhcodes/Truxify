@@ -1,0 +1,26 @@
+# Customer app specific ignores
+.dart_tool/
+.build/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Android/iOS
+**/local.properties
+.android/
+.ios/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
+*.keystore
+
+# Misc
+pubspec.lock

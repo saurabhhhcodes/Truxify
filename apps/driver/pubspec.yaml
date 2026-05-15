@@ -1,0 +1,23 @@
+name: truxify_driver
+description: Driver-side Truxify web Flutter app.
+publish_to: none
+
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  google_fonts: ^6.1.0
+  intl: ^0.20.2
+  go_router: ^13.0.0
+
+dev_dependencies:
+  flutter_lints: ^6.0.0
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true

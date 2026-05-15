@@ -1,0 +1,11 @@
+class AppRoutes {
+  static const splash = '/';
+  static const login = '/login';
+  static const otp = '/otp';
+  static const shell = '/shell';
+  static const loadDetail = '/load-detail';
+  static const tripHistory = '/trip-history';
+  static const documents = '/documents';
+  static const myTruck = '/my-truck';
+  static const earnings = '/earnings';
+}
