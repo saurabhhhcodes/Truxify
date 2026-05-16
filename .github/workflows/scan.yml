@@ -1,0 +1,1010 @@
+name: Truxify AI Code Analysis
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TRIGGERS
+# ─────────────────────────────────────────────────────────────────────────────
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'apps/customer/**'
+      - 'apps/driver/**'
+  workflow_dispatch:
+    inputs:
+      app:
+        description: 'Which app to analyze'
+        required: true
+        default: both
+        type: choice
+        options: [both, customer, driver]
+      force:
+        description: 'Force re-analysis even if code unchanged'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
+
+# One run at a time — never cancel in-progress
+concurrency:
+  group: truxify-ai-analysis
+  cancel-in-progress: false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# JOB 1 — detect which apps changed
+# ─────────────────────────────────────────────────────────────────────────────
+jobs:
+  detect-changes:
+    name: Detect changed apps
+    runs-on: ubuntu-latest
+    outputs:
+      customer: ${{ steps.changes.outputs.customer }}
+      driver:   ${{ steps.changes.outputs.driver }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect changed apps
+        id: changes
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            INPUT="${{ github.event.inputs.app }}"
+            if [ "$INPUT" = "both" ]; then
+              echo "customer=true"  >> "$GITHUB_OUTPUT"
+              echo "driver=true"    >> "$GITHUB_OUTPUT"
+            elif [ "$INPUT" = "customer" ]; then
+              echo "customer=true"  >> "$GITHUB_OUTPUT"
+              echo "driver=false"   >> "$GITHUB_OUTPUT"
+            else
+              echo "customer=false" >> "$GITHUB_OUTPUT"
+              echo "driver=true"    >> "$GITHUB_OUTPUT"
+            fi
+            exit 0
+          fi
+
+          if git rev-parse HEAD~1 >/dev/null 2>&1; then
+            CHANGED=$(git diff --name-only HEAD~1 HEAD)
+          else
+            CHANGED=$(git diff --name-only HEAD)
+          fi
+
+          echo "=== Changed files ==="
+          echo "$CHANGED"
+          echo "====================="
+
+          if echo "$CHANGED" | grep -q "^apps/customer/"; then
+            echo "customer=true"  >> "$GITHUB_OUTPUT"
+          else
+            echo "customer=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if echo "$CHANGED" | grep -q "^apps/driver/"; then
+            echo "driver=true"  >> "$GITHUB_OUTPUT"
+          else
+            echo "driver=false" >> "$GITHUB_OUTPUT"
+          fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# JOB 2 — analyze customer app
+# ─────────────────────────────────────────────────────────────────────────────
+  analyze-customer:
+    name: Analyze customer app
+    needs: detect-changes
+    if: needs.detect-changes.outputs.customer == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+      issues:   write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        working-directory: apps/customer
+        run: flutter pub get
+
+      - name: Flutter analyze
+        working-directory: apps/customer
+        run: flutter analyze --no-pub 2>&1 | tee "$GITHUB_WORKSPACE/analyze.txt" || true
+
+      - name: Check source hash
+        id: hash
+        run: |
+          set -euo pipefail
+
+          DART_FILES=$(find apps/customer/lib -name "*.dart" \
+            ! -name "*.g.dart" \
+            ! -name "*.freezed.dart" \
+            ! -name "*.gen.dart" \
+            2>/dev/null | sort)
+
+          if [ -z "$DART_FILES" ]; then
+            echo "No Dart files found in apps/customer/lib"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "hash=empty"    >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          HASH=$(echo "$DART_FILES" | xargs cat | sha256sum | cut -d' ' -f1)
+          echo "hash=$HASH" >> "$GITHUB_OUTPUT"
+          echo "Source hash: $HASH"
+
+          FORCE="${{ github.event.inputs.force || 'false' }}"
+          HASH_FILE=".github/hash_customer.txt"
+
+          if [ "$FORCE" = "true" ]; then
+            echo "Force flag set - running regardless of hash"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          elif [ -f "$HASH_FILE" ] && [ "$(cat "$HASH_FILE")" = "$HASH" ]; then
+            echo "No Dart changes since last analysis - skipping"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Dart changes detected - proceeding"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Ensure labels
+        if: steps.hash.outputs.changed == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const labels = [
+              { name: 'flutter-ai-analysis', color: '0075ca' },
+              { name: 'ai-generated',        color: 'e4e669' },
+              { name: 'customer-app',        color: '0052cc' },
+              { name: 'driver-app',          color: 'e65100' },
+              { name: 'flutter',             color: '54C5F8' },
+              { name: 'critical',            color: 'd73a4a' },
+              { name: 'high',                color: 'e99695' },
+              { name: 'medium',              color: 'f9d0c4' },
+              { name: 'low',                 color: 'cfd3d7' },
+              { name: 'bug',                 color: 'd73a4a' },
+              { name: 'enhancement',         color: 'a2eeef' },
+              { name: 'good first issue',    color: '7057ff' },
+              { name: 'help wanted',         color: '008672' },
+            ];
+            for (const l of labels) {
+              try {
+                await github.rest.issues.createLabel({
+                  owner: context.repo.owner,
+                  repo:  context.repo.repo,
+                  name:  l.name,
+                  color: l.color,
+                });
+              } catch (e) {
+                if (e.status !== 422) throw e;
+              }
+            }
+
+      - name: Build analysis report
+        if: steps.hash.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+
+          {
+            echo "# Customer App Code Analysis Report"
+            echo "## Flutter Analyze Output"
+            cat analyze.txt
+            echo ""
+            echo "## pubspec.yaml"
+            cat apps/customer/pubspec.yaml
+            echo ""
+            echo "## File Structure"
+            find apps/customer/lib -name "*.dart" ! -name "*.g.dart" | sort
+            echo ""
+            echo "## Source Files"
+            find apps/customer/lib -name "*.dart" \
+              ! -name "*.g.dart" \
+              ! -name "*.freezed.dart" \
+              ! -name "*.gen.dart" \
+              2>/dev/null | sort | while IFS= read -r f; do
+                echo "### FILE: $f"
+                echo '```dart'
+                cat "$f"
+                echo '```'
+                echo ""
+              done
+          } > report_full.txt
+
+          head -c 22000 report_full.txt > report.txt
+          echo "Report size: $(wc -c < report.txt) bytes"
+          echo "Files included: $(grep -c '### FILE:' report.txt || true) of $(grep -c '### FILE:' report_full.txt || true)"
+
+      - name: Run AI analysis
+        id: ai
+        if: steps.hash.outputs.changed == 'true'
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY:   ${{ secrets.GROQ_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          SOURCE=$(cat report.txt)
+
+          PROMPT="You are a senior Flutter engineer reviewing the Truxify customer app (apps/customer). It is a Flutter web app with a peacock green theme (#00897B = kPrimary in app_colors.dart). Mock data only, no backend yet.
+
+          INSTRUCTIONS:
+          - Read every file carefully.
+          - Report ONLY real issues visible in the code. Do NOT invent issues.
+          - Skip generated files (*.g.dart, *.freezed.dart, *.gen.dart).
+
+          CHECK FOR:
+          1. Missing const on StatelessWidget constructors
+          2. Controllers not disposed (TextEditingController, AnimationController, ScrollController, FocusNode)
+          3. setState rebuilding too much of the tree
+          4. Hardcoded Color(0xFF...) instead of kPrimary or theme colors
+          5. async without try/catch
+          6. Missing mounted check after await
+          7. build() over 150 lines needing splitting
+          8. Unused imports or variables
+          9. print() or debugPrint() in production code
+          10. Magic numbers not extracted as named constants
+          11. Duplicate logic across files
+
+          OUTPUT FORMAT - follow exactly:
+
+          ISSUE_START
+          title: [CODE:slug] short description max six words
+          severity: critical|high|medium|low
+          category: Performance|Memory|Quality|Safety|Structure|Naming|Maintainability
+          file: apps/customer/lib/path/to/file.dart
+          line: 42
+          description: One precise sentence about what is wrong.
+          suggestion: Specific fix with a short code snippet.
+          extra_label: bug|enhancement|good first issue|help wanted
+          ISSUE_END
+
+          CODE prefix: PE=Performance ML=MemoryLeak CQ=CodeQuality SE=Safety ST=Structure NA=Naming MA=Maintainability
+          slug = filename only, no path, no extension, lowercase, underscores only
+
+          After all issues output:
+          SUMMARY_START
+          filename.dart - clean or N issues found
+          Overall: two sentence assessment.
+          SUMMARY_END
+
+          SOURCE CODE:
+          $SOURCE"
+
+          GEMINI_URL="https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+
+          call_gemini() {
+            local KEY="$GEMINI_API_KEY"
+            if [ -z "$KEY" ]; then echo "000"; return; fi
+            PAYLOAD=$(jq -n --arg t "$PROMPT" \
+              '{contents:[{parts:[{text:$t}]}],generationConfig:{temperature:0.1,maxOutputTokens:4096}}')
+            HTTP_CODE=$(curl -s -o gemini_out.json -w "%{http_code}" --max-time 120 \
+              "${GEMINI_URL}?key=${KEY}" \
+              -H "Content-Type: application/json" \
+              -d "$PAYLOAD" 2>/dev/null) || HTTP_CODE="000"
+            echo "$HTTP_CODE"
+          }
+
+          call_groq() {
+            local KEY="$GROQ_API_KEY"
+            if [ -z "$KEY" ]; then echo "000"; return; fi
+            PAYLOAD=$(jq -n --arg t "$PROMPT" \
+              '{model:"llama3-8b-8192",max_tokens:4096,temperature:0.1,messages:[{role:"user",content:$t}]}')
+            HTTP_CODE=$(curl -s -o groq_out.json -w "%{http_code}" --max-time 120 \
+              "https://api.groq.com/openai/v1/chat/completions" \
+              -H "Authorization: Bearer ${KEY}" \
+              -H "Content-Type: application/json" \
+              -d "$PAYLOAD" 2>/dev/null) || HTTP_CODE="000"
+            echo "$HTTP_CODE"
+          }
+
+          echo "Calling Gemini..."
+          STATUS=$(call_gemini)
+          echo "Gemini status: $STATUS"
+
+          if [ "$STATUS" = "200" ]; then
+            TEXT=$(jq -r '.candidates[0].content.parts[0].text // empty' gemini_out.json 2>/dev/null || true)
+            if [ -n "$TEXT" ]; then
+              echo "$TEXT" > analysis.txt
+              echo "PROVIDER=Gemini 2.0 Flash" >> "$GITHUB_ENV"
+              echo "Gemini succeeded"
+              exit 0
+            fi
+          fi
+
+          if [ "$STATUS" = "429" ] || [ "$STATUS" = "500" ] || [ "$STATUS" = "503" ]; then
+            echo "Gemini transient error $STATUS - waiting 90s and retrying..."
+            sleep 90
+            STATUS=$(call_gemini)
+            echo "Gemini retry status: $STATUS"
+            if [ "$STATUS" = "200" ]; then
+              TEXT=$(jq -r '.candidates[0].content.parts[0].text // empty' gemini_out.json 2>/dev/null || true)
+              if [ -n "$TEXT" ]; then
+                echo "$TEXT" > analysis.txt
+                echo "PROVIDER=Gemini 2.0 Flash (retry)" >> "$GITHUB_ENV"
+                echo "Gemini retry succeeded"
+                exit 0
+              fi
+            fi
+          fi
+
+          echo "Falling back to Groq..."
+          STATUS=$(call_groq)
+          echo "Groq status: $STATUS"
+
+          if [ "$STATUS" = "200" ]; then
+            TEXT=$(jq -r '.choices[0].message.content // empty' groq_out.json 2>/dev/null || true)
+            if [ -n "$TEXT" ]; then
+              echo "$TEXT" > analysis.txt
+              echo "PROVIDER=Groq llama3-8b" >> "$GITHUB_ENV"
+              echo "Groq succeeded"
+              exit 0
+            fi
+          fi
+
+          echo "All AI providers failed"
+          cat gemini_out.json 2>/dev/null || true
+          cat groq_out.json   2>/dev/null || true
+          echo "AI_FAILED=true" >> "$GITHUB_ENV"
+
+      - name: Report AI failure as issue
+        if: env.AI_FAILED == 'true' && steps.hash.outputs.changed == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const existing = await github.paginate(
+              github.rest.issues.listForRepo, {
+                owner: context.repo.owner,
+                repo:  context.repo.repo,
+                state: 'open',
+                labels: 'flutter-ai-analysis',
+                per_page: 100,
+              }
+            );
+            const alreadyOpen = existing.some(i =>
+              (i.body || '').includes('<!--fp:ai-failure-customer-->')
+            );
+            if (alreadyOpen) {
+              console.log('AI failure issue already open - skipping');
+              return;
+            }
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              title: 'AI analysis failed - customer app',
+              labels: ['flutter-ai-analysis', 'customer-app'],
+              body: [
+                '<!--fp:ai-failure-customer-->',
+                '## AI Analysis Failed',
+                'Both Gemini and Groq failed to respond during the customer app analysis.',
+                '',
+                `**Run:** [View logs](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`,
+                `**Commit:** \`${context.sha.substring(0, 7)}\``,
+                '',
+                'Check API keys in repository secrets and re-run the workflow.',
+                `_${new Date().toUTCString()}_`,
+              ].join('\n'),
+            });
+
+      - name: Create GitHub issues
+        if: env.AI_FAILED != 'true' && steps.hash.outputs.changed == 'true'
+        uses: actions/github-script@v7
+        env:
+          PROVIDER:   ${{ env.PROVIDER }}
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_ID:     ${{ github.run_id }}
+        with:
+          script: |
+            const fs = require('fs');
+            if (!fs.existsSync('analysis.txt')) {
+              console.log('No analysis.txt - nothing to create');
+              return;
+            }
+
+            const text   = fs.readFileSync('analysis.txt', 'utf8');
+            const blocks = [...text.matchAll(/ISSUE_START([\s\S]*?)ISSUE_END/g)];
+            console.log(`AI returned ${blocks.length} issue block(s)`);
+
+            if (!blocks.length) {
+              console.log('No issues found - code is clean');
+              return;
+            }
+
+            const get = (txt, key) => {
+              const m = txt.match(new RegExp(`${key}:\\s*([^\\n]+)`));
+              return m ? m[1].trim() : 'Unknown';
+            };
+
+            const makeFingerprint = (title) => {
+              const m = title.match(/\[([A-Z]{2}:[a-z0-9_]+)\]/i);
+              if (m) return `ca-v3:${m[1].toLowerCase()}`;
+              return 'ca-v3:' + title.toLowerCase()
+                .replace(/[^a-z0-9]+/g, '-')
+                .replace(/^-+|-+$/g, '')
+                .substring(0, 60);
+            };
+
+            const extractFP = (body) => {
+              const m = (body || '').match(/<!--fp:([^>]+)-->/);
+              return m ? m[1].trim() : null;
+            };
+
+            console.log('Fetching all flutter-ai-analysis issues (open + closed)...');
+            const existing = await github.paginate(
+              github.rest.issues.listForRepo, {
+                owner: context.repo.owner,
+                repo:  context.repo.repo,
+                state: 'all',
+                labels: 'flutter-ai-analysis',
+                per_page: 100,
+              }
+            );
+
+            const knownFPs = new Set(
+              existing.map(i => extractFP(i.body || '')).filter(Boolean)
+            );
+            console.log(`Known fingerprints (open + closed): ${knownFPs.size}`);
+
+            const VALID_SEV   = new Set(['critical', 'high', 'medium', 'low']);
+            const VALID_EXTRA = new Set(['bug', 'enhancement', 'good first issue', 'help wanted']);
+            const SEV_EMOJI   = { critical: '🔴', high: '🟠', medium: '🟡', low: '🔵' };
+
+            let created = 0, skipped = 0, failed = 0;
+
+            for (const block of blocks) {
+              const t     = block[1];
+              const title = get(t, 'title');
+              const sev   = get(t, 'severity').toLowerCase();
+              const extra = get(t, 'extra_label').toLowerCase();
+              const fp    = makeFingerprint(title);
+
+              if (knownFPs.has(fp)) {
+                console.log(`SKIP (already exists): ${fp}`);
+                skipped++;
+                continue;
+              }
+
+              const labels = [
+                'flutter-ai-analysis', 'ai-generated', 'flutter', 'customer-app',
+                VALID_SEV.has(sev) ? sev : 'low',
+              ];
+              if (VALID_EXTRA.has(extra)) labels.push(extra);
+
+              const sha  = (process.env.COMMIT_SHA || '').substring(0, 7);
+              const repo = `${context.repo.owner}/${context.repo.repo}`;
+
+              const body = [
+                `<!--fp:${fp}-->`,
+                `## ${SEV_EMOJI[sev] || 'o'} ${title}`,
+                `> AI-generated - verify in code before acting on this.`,
+                '',
+                `| Field | Value |`,
+                `|---|---|`,
+                `| App | customer |`,
+                `| Severity | ${sev.toUpperCase()} |`,
+                `| Category | ${get(t, 'category')} |`,
+                `| File | ${get(t, 'file')} |`,
+                `| Line | ${get(t, 'line')} |`,
+                `| Commit | [\`${sha}\`](https://github.com/${repo}/commit/${process.env.COMMIT_SHA}) |`,
+                `| Analyzed by | ${process.env.PROVIDER} |`,
+                `| Run | [View](https://github.com/${repo}/actions/runs/${process.env.RUN_ID}) |`,
+                '',
+                `### Problem`,
+                get(t, 'description'),
+                '',
+                `### Suggested Fix`,
+                get(t, 'suggestion'),
+                '',
+                `### Closing`,
+                `Apply the fix, push, and close this issue manually when done.`,
+                '',
+                `_Generated ${new Date().toUTCString()}_`,
+              ].join('\n');
+
+              try {
+                await github.rest.issues.create({
+                  owner: context.repo.owner,
+                  repo:  context.repo.repo,
+                  title, body, labels,
+                });
+                knownFPs.add(fp);
+                created++;
+                console.log(`CREATED [${fp}]: ${title}`);
+              } catch (e) {
+                failed++;
+                console.error(`FAILED "${title}": ${e.message}`);
+              }
+
+              await new Promise(r => setTimeout(r, 800));
+            }
+
+            console.log(`Created: ${created} | Skipped: ${skipped} | Failed: ${failed}`);
+            if (failed > 0) core.setFailed(`${failed} issue(s) failed to create`);
+
+      - name: Save source hash
+        if: steps.hash.outputs.changed == 'true' && env.AI_FAILED != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p .github
+          echo "${{ steps.hash.outputs.hash }}" > .github/hash_customer.txt
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .github/hash_customer.txt
+          if git diff --staged --quiet; then
+            echo "Hash unchanged - nothing to commit"
+          else
+            git commit -m "chore: update customer app source hash [skip ci]"
+            git push
+          fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# JOB 3 — analyze driver app (always after customer, never parallel)
+# ─────────────────────────────────────────────────────────────────────────────
+  analyze-driver:
+    name: Analyze driver app
+    needs: [detect-changes, analyze-customer]
+    if: |
+      always() &&
+      needs.detect-changes.outputs.driver == 'true' &&
+      (needs.analyze-customer.result == 'success' ||
+       needs.analyze-customer.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+      issues:   write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        working-directory: apps/driver
+        run: flutter pub get
+
+      - name: Flutter analyze
+        working-directory: apps/driver
+        run: flutter analyze --no-pub 2>&1 | tee "$GITHUB_WORKSPACE/analyze.txt" || true
+
+      - name: Check source hash
+        id: hash
+        run: |
+          set -euo pipefail
+
+          DART_FILES=$(find apps/driver/lib -name "*.dart" \
+            ! -name "*.g.dart" \
+            ! -name "*.freezed.dart" \
+            ! -name "*.gen.dart" \
+            2>/dev/null | sort)
+
+          if [ -z "$DART_FILES" ]; then
+            echo "No Dart files found in apps/driver/lib"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "hash=empty"    >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          HASH=$(echo "$DART_FILES" | xargs cat | sha256sum | cut -d' ' -f1)
+          echo "hash=$HASH" >> "$GITHUB_OUTPUT"
+          echo "Source hash: $HASH"
+
+          FORCE="${{ github.event.inputs.force || 'false' }}"
+          HASH_FILE=".github/hash_driver.txt"
+
+          if [ "$FORCE" = "true" ]; then
+            echo "Force flag set - running regardless of hash"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          elif [ -f "$HASH_FILE" ] && [ "$(cat "$HASH_FILE")" = "$HASH" ]; then
+            echo "No Dart changes since last analysis - skipping"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Dart changes detected - proceeding"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Wait for Gemini quota recovery
+        if: steps.hash.outputs.changed == 'true'
+        run: |
+          echo "Waiting 45s for Gemini quota to recover after customer job..."
+          sleep 45
+
+      - name: Ensure labels
+        if: steps.hash.outputs.changed == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const labels = [
+              { name: 'flutter-ai-analysis', color: '0075ca' },
+              { name: 'ai-generated',        color: 'e4e669' },
+              { name: 'customer-app',        color: '0052cc' },
+              { name: 'driver-app',          color: 'e65100' },
+              { name: 'flutter',             color: '54C5F8' },
+              { name: 'critical',            color: 'd73a4a' },
+              { name: 'high',                color: 'e99695' },
+              { name: 'medium',              color: 'f9d0c4' },
+              { name: 'low',                 color: 'cfd3d7' },
+              { name: 'bug',                 color: 'd73a4a' },
+              { name: 'enhancement',         color: 'a2eeef' },
+              { name: 'good first issue',    color: '7057ff' },
+              { name: 'help wanted',         color: '008672' },
+            ];
+            for (const l of labels) {
+              try {
+                await github.rest.issues.createLabel({
+                  owner: context.repo.owner,
+                  repo:  context.repo.repo,
+                  name:  l.name,
+                  color: l.color,
+                });
+              } catch (e) {
+                if (e.status !== 422) throw e;
+              }
+            }
+
+      - name: Build analysis report
+        if: steps.hash.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+
+          {
+            echo "# Driver App Code Analysis Report"
+            echo "## Flutter Analyze Output"
+            cat analyze.txt
+            echo ""
+            echo "## pubspec.yaml"
+            cat apps/driver/pubspec.yaml
+            echo ""
+            echo "## File Structure"
+            find apps/driver/lib -name "*.dart" ! -name "*.g.dart" | sort
+            echo ""
+            echo "## Source Files"
+            find apps/driver/lib -name "*.dart" \
+              ! -name "*.g.dart" \
+              ! -name "*.freezed.dart" \
+              ! -name "*.gen.dart" \
+              2>/dev/null | sort | while IFS= read -r f; do
+                echo "### FILE: $f"
+                echo '```dart'
+                cat "$f"
+                echo '```'
+                echo ""
+              done
+          } > report_full.txt
+
+          head -c 22000 report_full.txt > report.txt
+          echo "Report size: $(wc -c < report.txt) bytes"
+          echo "Files included: $(grep -c '### FILE:' report.txt || true) of $(grep -c '### FILE:' report_full.txt || true)"
+
+      - name: Run AI analysis
+        id: ai
+        if: steps.hash.outputs.changed == 'true'
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY:   ${{ secrets.GROQ_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          SOURCE=$(cat report.txt)
+
+          PROMPT="You are a senior Flutter engineer reviewing the Truxify driver app (apps/driver). It is a Flutter web app with a maroon theme (#8B1A1A = kPrimary in app_colors.dart). Mock data only, no backend yet.
+
+          INSTRUCTIONS:
+          - Read every file carefully.
+          - Report ONLY real issues visible in the code. Do NOT invent issues.
+          - Skip generated files (*.g.dart, *.freezed.dart, *.gen.dart).
+
+          CHECK FOR:
+          1. Missing const on StatelessWidget constructors
+          2. Controllers not disposed (TextEditingController, AnimationController, ScrollController, FocusNode)
+          3. setState rebuilding too much of the tree
+          4. Hardcoded Color(0xFF...) instead of kPrimary or theme colors
+          5. async without try/catch
+          6. Missing mounted check after await
+          7. build() over 150 lines needing splitting
+          8. Unused imports or variables
+          9. print() or debugPrint() in production code
+          10. Magic numbers not extracted as named constants
+          11. Duplicate logic across files
+
+          OUTPUT FORMAT - follow exactly:
+
+          ISSUE_START
+          title: [CODE:slug] short description max six words
+          severity: critical|high|medium|low
+          category: Performance|Memory|Quality|Safety|Structure|Naming|Maintainability
+          file: apps/driver/lib/path/to/file.dart
+          line: 42
+          description: One precise sentence about what is wrong.
+          suggestion: Specific fix with a short code snippet.
+          extra_label: bug|enhancement|good first issue|help wanted
+          ISSUE_END
+
+          CODE prefix: PE=Performance ML=MemoryLeak CQ=CodeQuality SE=Safety ST=Structure NA=Naming MA=Maintainability
+          slug = filename only, no path, no extension, lowercase, underscores only
+
+          After all issues output:
+          SUMMARY_START
+          filename.dart - clean or N issues found
+          Overall: two sentence assessment.
+          SUMMARY_END
+
+          SOURCE CODE:
+          $SOURCE"
+
+          GEMINI_URL="https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+
+          call_gemini() {
+            local KEY="$GEMINI_API_KEY"
+            if [ -z "$KEY" ]; then echo "000"; return; fi
+            PAYLOAD=$(jq -n --arg t "$PROMPT" \
+              '{contents:[{parts:[{text:$t}]}],generationConfig:{temperature:0.1,maxOutputTokens:4096}}')
+            HTTP_CODE=$(curl -s -o gemini_out.json -w "%{http_code}" --max-time 120 \
+              "${GEMINI_URL}?key=${KEY}" \
+              -H "Content-Type: application/json" \
+              -d "$PAYLOAD" 2>/dev/null) || HTTP_CODE="000"
+            echo "$HTTP_CODE"
+          }
+
+          call_groq() {
+            local KEY="$GROQ_API_KEY"
+            if [ -z "$KEY" ]; then echo "000"; return; fi
+            PAYLOAD=$(jq -n --arg t "$PROMPT" \
+              '{model:"llama3-8b-8192",max_tokens:4096,temperature:0.1,messages:[{role:"user",content:$t}]}')
+            HTTP_CODE=$(curl -s -o groq_out.json -w "%{http_code}" --max-time 120 \
+              "https://api.groq.com/openai/v1/chat/completions" \
+              -H "Authorization: Bearer ${KEY}" \
+              -H "Content-Type: application/json" \
+              -d "$PAYLOAD" 2>/dev/null) || HTTP_CODE="000"
+            echo "$HTTP_CODE"
+          }
+
+          echo "Calling Gemini..."
+          STATUS=$(call_gemini)
+          echo "Gemini status: $STATUS"
+
+          if [ "$STATUS" = "200" ]; then
+            TEXT=$(jq -r '.candidates[0].content.parts[0].text // empty' gemini_out.json 2>/dev/null || true)
+            if [ -n "$TEXT" ]; then
+              echo "$TEXT" > analysis.txt
+              echo "PROVIDER=Gemini 2.0 Flash" >> "$GITHUB_ENV"
+              echo "Gemini succeeded"
+              exit 0
+            fi
+          fi
+
+          if [ "$STATUS" = "429" ] || [ "$STATUS" = "500" ] || [ "$STATUS" = "503" ]; then
+            echo "Gemini transient error $STATUS - waiting 90s and retrying..."
+            sleep 90
+            STATUS=$(call_gemini)
+            echo "Gemini retry status: $STATUS"
+            if [ "$STATUS" = "200" ]; then
+              TEXT=$(jq -r '.candidates[0].content.parts[0].text // empty' gemini_out.json 2>/dev/null || true)
+              if [ -n "$TEXT" ]; then
+                echo "$TEXT" > analysis.txt
+                echo "PROVIDER=Gemini 2.0 Flash (retry)" >> "$GITHUB_ENV"
+                echo "Gemini retry succeeded"
+                exit 0
+              fi
+            fi
+          fi
+
+          echo "Falling back to Groq..."
+          STATUS=$(call_groq)
+          echo "Groq status: $STATUS"
+
+          if [ "$STATUS" = "200" ]; then
+            TEXT=$(jq -r '.choices[0].message.content // empty' groq_out.json 2>/dev/null || true)
+            if [ -n "$TEXT" ]; then
+              echo "$TEXT" > analysis.txt
+              echo "PROVIDER=Groq llama3-8b" >> "$GITHUB_ENV"
+              echo "Groq succeeded"
+              exit 0
+            fi
+          fi
+
+          echo "All AI providers failed"
+          cat gemini_out.json 2>/dev/null || true
+          cat groq_out.json   2>/dev/null || true
+          echo "AI_FAILED=true" >> "$GITHUB_ENV"
+
+      - name: Report AI failure as issue
+        if: env.AI_FAILED == 'true' && steps.hash.outputs.changed == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const existing = await github.paginate(
+              github.rest.issues.listForRepo, {
+                owner: context.repo.owner,
+                repo:  context.repo.repo,
+                state: 'open',
+                labels: 'flutter-ai-analysis',
+                per_page: 100,
+              }
+            );
+            const alreadyOpen = existing.some(i =>
+              (i.body || '').includes('<!--fp:ai-failure-driver-->')
+            );
+            if (alreadyOpen) {
+              console.log('AI failure issue already open - skipping');
+              return;
+            }
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              title: 'AI analysis failed - driver app',
+              labels: ['flutter-ai-analysis', 'driver-app'],
+              body: [
+                '<!--fp:ai-failure-driver-->',
+                '## AI Analysis Failed',
+                'Both Gemini and Groq failed during the driver app analysis.',
+                '',
+                `**Run:** [View logs](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`,
+                `**Commit:** \`${context.sha.substring(0, 7)}\``,
+                '',
+                'Check API keys in repository secrets and re-run the workflow.',
+                `_${new Date().toUTCString()}_`,
+              ].join('\n'),
+            });
+
+      - name: Create GitHub issues
+        if: env.AI_FAILED != 'true' && steps.hash.outputs.changed == 'true'
+        uses: actions/github-script@v7
+        env:
+          PROVIDER:   ${{ env.PROVIDER }}
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_ID:     ${{ github.run_id }}
+        with:
+          script: |
+            const fs = require('fs');
+            if (!fs.existsSync('analysis.txt')) {
+              console.log('No analysis.txt - nothing to create');
+              return;
+            }
+
+            const text   = fs.readFileSync('analysis.txt', 'utf8');
+            const blocks = [...text.matchAll(/ISSUE_START([\s\S]*?)ISSUE_END/g)];
+            console.log(`AI returned ${blocks.length} issue block(s)`);
+
+            if (!blocks.length) {
+              console.log('No issues found - code is clean');
+              return;
+            }
+
+            const get = (txt, key) => {
+              const m = txt.match(new RegExp(`${key}:\\s*([^\\n]+)`));
+              return m ? m[1].trim() : 'Unknown';
+            };
+
+            const makeFingerprint = (title) => {
+              const m = title.match(/\[([A-Z]{2}:[a-z0-9_]+)\]/i);
+              if (m) return `da-v3:${m[1].toLowerCase()}`;
+              return 'da-v3:' + title.toLowerCase()
+                .replace(/[^a-z0-9]+/g, '-')
+                .replace(/^-+|-+$/g, '')
+                .substring(0, 60);
+            };
+
+            const extractFP = (body) => {
+              const m = (body || '').match(/<!--fp:([^>]+)-->/);
+              return m ? m[1].trim() : null;
+            };
+
+            console.log('Fetching all flutter-ai-analysis issues (open + closed)...');
+            const existing = await github.paginate(
+              github.rest.issues.listForRepo, {
+                owner: context.repo.owner,
+                repo:  context.repo.repo,
+                state: 'all',
+                labels: 'flutter-ai-analysis',
+                per_page: 100,
+              }
+            );
+
+            const knownFPs = new Set(
+              existing.map(i => extractFP(i.body || '')).filter(Boolean)
+            );
+            console.log(`Known fingerprints (open + closed): ${knownFPs.size}`);
+
+            const VALID_SEV   = new Set(['critical', 'high', 'medium', 'low']);
+            const VALID_EXTRA = new Set(['bug', 'enhancement', 'good first issue', 'help wanted']);
+            const SEV_EMOJI   = { critical: '🔴', high: '🟠', medium: '🟡', low: '🔵' };
+
+            let created = 0, skipped = 0, failed = 0;
+
+            for (const block of blocks) {
+              const t     = block[1];
+              const title = get(t, 'title');
+              const sev   = get(t, 'severity').toLowerCase();
+              const extra = get(t, 'extra_label').toLowerCase();
+              const fp    = makeFingerprint(title);
+
+              if (knownFPs.has(fp)) {
+                console.log(`SKIP (already exists): ${fp}`);
+                skipped++;
+                continue;
+              }
+
+              const labels = [
+                'flutter-ai-analysis', 'ai-generated', 'flutter', 'driver-app',
+                VALID_SEV.has(sev) ? sev : 'low',
+              ];
+              if (VALID_EXTRA.has(extra)) labels.push(extra);
+
+              const sha  = (process.env.COMMIT_SHA || '').substring(0, 7);
+              const repo = `${context.repo.owner}/${context.repo.repo}`;
+
+              const body = [
+                `<!--fp:${fp}-->`,
+                `## ${SEV_EMOJI[sev] || 'o'} ${title}`,
+                `> AI-generated - verify in code before acting on this.`,
+                '',
+                `| Field | Value |`,
+                `|---|---|`,
+                `| App | driver |`,
+                `| Severity | ${sev.toUpperCase()} |`,
+                `| Category | ${get(t, 'category')} |`,
+                `| File | ${get(t, 'file')} |`,
+                `| Line | ${get(t, 'line')} |`,
+                `| Commit | [\`${sha}\`](https://github.com/${repo}/commit/${process.env.COMMIT_SHA}) |`,
+                `| Analyzed by | ${process.env.PROVIDER} |`,
+                `| Run | [View](https://github.com/${repo}/actions/runs/${process.env.RUN_ID}) |`,
+                '',
+                `### Problem`,
+                get(t, 'description'),
+                '',
+                `### Suggested Fix`,
+                get(t, 'suggestion'),
+                '',
+                `### Closing`,
+                `Apply the fix, push, and close this issue manually when done.`,
+                '',
+                `_Generated ${new Date().toUTCString()}_`,
+              ].join('\n');
+
+              try {
+                await github.rest.issues.create({
+                  owner: context.repo.owner,
+                  repo:  context.repo.repo,
+                  title, body, labels,
+                });
+                knownFPs.add(fp);
+                created++;
+                console.log(`CREATED [${fp}]: ${title}`);
+              } catch (e) {
+                failed++;
+                console.error(`FAILED "${title}": ${e.message}`);
+              }
+
+              await new Promise(r => setTimeout(r, 800));
+            }
+
+            console.log(`Created: ${created} | Skipped: ${skipped} | Failed: ${failed}`);
+            if (failed > 0) core.setFailed(`${failed} issue(s) failed to create`);
+
+      - name: Save source hash
+        if: steps.hash.outputs.changed == 'true' && env.AI_FAILED != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p .github
+          echo "${{ steps.hash.outputs.hash }}" > .github/hash_driver.txt
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .github/hash_driver.txt
+          if git diff --staged --quiet; then
+            echo "Hash unchanged - nothing to commit"
+          else
+            git commit -m "chore: update driver app source hash [skip ci]"
+            git push
+          fi
