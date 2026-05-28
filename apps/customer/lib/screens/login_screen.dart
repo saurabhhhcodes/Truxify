@@ -148,9 +148,20 @@ class _LoginScreenState extends State<LoginScreen> {
                     if (value.isNotEmpty && index < 3) {
                       _otpFocusNodes[index + 1].requestFocus();
                     }
-                     if (value.isEmpty && index > 0) {
+                    if (value.isEmpty && index > 0) {
                       _otpFocusNodes[index - 1].requestFocus();
                     }
+                  },
+                  onKeyEvent: (node, event) {
+                    if (event is KeyDownEvent &&
+                        event.logicalKey == LogicalKeyboardKey.backspace &&
+                        _otpControllers[index].text.isEmpty &&
+                        index > 0) {
+                      _otpFocusNodes[index - 1].requestFocus();
+                      _otpControllers[index - 1].clear();
+                      return KeyEventResult.handled;
+                    }
+                    return KeyEventResult.ignored;
                   },
                 ),
               ),
