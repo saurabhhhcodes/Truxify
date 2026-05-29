@@ -1,3 +1,7 @@
+import 'package:flutter/material.dart';
+
+import '../theme/app_theme.dart';
+
 class PulsingLocationDot extends StatefulWidget {
   const PulsingLocationDot({
     super.key,
