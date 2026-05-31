@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:freightfair/widgets/order_card.dart';
+import 'package:truxify/widgets/order_card.dart';
 
 import '../controllers/app_controller.dart';
 import '../data/mock_data.dart';
@@ -18,7 +18,7 @@ class OrdersScreen extends StatefulWidget {
 
 class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderStateMixin {
   TabController? _tabController;
-  FreightFairController? _controller;
+  TruxifyController? _controller;
   final TextEditingController _searchController = TextEditingController();
   bool _isSearching = false;
   String _searchQuery = '';
@@ -26,7 +26,7 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final controller = FreightFairScope.of(context);
+    final controller = TruxifyScope.of(context);
     if (_tabController == null) {
       _controller = controller;
       _tabController = TabController(length: 2, vsync: this, initialIndex: controller.ordersTabIndex);

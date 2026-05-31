@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../theme/app_theme.dart';
 
 class AppLogo extends StatelessWidget {
   const AppLogo({super.key, this.centered = false, this.textStyle, this.iconSize = 22});
@@ -16,14 +17,14 @@ class AppLogo extends StatelessWidget {
           width: iconSize + 10,
           height: iconSize + 10,
           decoration: BoxDecoration(
-            color: FreightFairColors.accentLight,
+            color: TruxifyColors.accentLight,
             borderRadius: BorderRadius.circular(12),
           ),
-          child: Icon(Icons.local_shipping_rounded, color: FreightFairColors.accentDark, size: iconSize),
+          child: Icon(Icons.local_shipping_rounded, color: TruxifyColors.accentDark, size: iconSize),
         ),
         const SizedBox(width: 10),
         Text(
-          'FreightFair',
+          'Truxify',
           style: textStyle ?? const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
         ),
       ],

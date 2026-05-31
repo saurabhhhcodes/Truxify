@@ -5,7 +5,7 @@ import '../theme/app_theme.dart';
 class TimelineConnector extends StatelessWidget {
   const TimelineConnector({
     super.key,
-    this.color = FreightFairColors.border,
+    this.color = TruxifyColors.border,
     this.width = 28,
     this.height = 2,
   });

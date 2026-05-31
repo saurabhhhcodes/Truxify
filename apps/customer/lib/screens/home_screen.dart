@@ -42,7 +42,7 @@ class HomeScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final controller = FreightFairScope.of(context);
+    final controller = TruxifyScope.of(context);
     final now = DateTime.now();
     final customerFirstName = mockCustomerName.split(' ').first;
     final greeting = _greetingFor(now);
@@ -61,13 +61,13 @@ class HomeScreen extends StatelessWidget {
                   color: Theme.of(context).colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(999),
                   border: Border.all(
-                    color: Theme.of(context).brightness == Brightness.dark ? FreightFairColors.darkBorder : FreightFairColors.border,
+                    color: Theme.of(context).brightness == Brightness.dark ? TruxifyColors.darkBorder : TruxifyColors.border,
                   ),
                 ),
                 child: const Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.place_rounded, size: 16, color: FreightFairColors.accentDark),
+                    Icon(Icons.place_rounded, size: 16, color: TruxifyColors.accentDark),
                     SizedBox(width: 6),
                     Text('Surat, Gujarat', style: TextStyle(fontWeight: FontWeight.w700)),
                   ],
@@ -90,7 +90,7 @@ class HomeScreen extends StatelessWidget {
             const SizedBox(height: 6),
             Text(
               DateFormat('EEEE, d MMMM yyyy').format(now),
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: FreightFairColors.adaptiveSecondaryText(context)),
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context)),
             ),
             const SizedBox(height: 26),
             SectionHeader(title: 'Active Shipments', actionLabel: 'See all', onActionTap: () => _showComingSoon(context, 'All shipments')),
