@@ -416,12 +416,22 @@ router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), 
 
     let truckInfo = null;
     if (details && details.truck_id) {
-      truckInfo = await supabase
+      // The Supabase `maybeSingle()` builder returns a thenable, but
+      // awaiting the outer promise with `.then(res => res.data)` here
+      // would re-wrap the row in another Promise, leaving `truckInfo` as
+      // a Promise object (whose `id` and `number_plate` properties are
+      // undefined). Use a normal `await` and destructure `data` so the
+      // row is actually unwrapped before the RPC call below.
+      const { data, error: truckErr } = await supabase
         .from('trucks')
         .select('id, name, number_plate')
         .eq('id', details.truck_id)
-        .maybeSingle()
-        .then(res => res.data);
+        .maybeSingle();
+
+      if (truckErr) {
+        console.error('Truck lookup error during bid accept:', truckErr.message);
+      }
+      truckInfo = data;
     }
 
     // 6.4 Execute atomically via Supabase RPC
