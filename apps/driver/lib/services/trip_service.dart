@@ -2,10 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class TripService {
-  TripService({SupabaseClient? client})
-      : _client = client ?? Supabase.instance.client;
+  TripService({SupabaseClient? client}) : _providedClient = client;
 
-  final SupabaseClient _client;
+  final SupabaseClient? _providedClient;
+
+  SupabaseClient get _client => _providedClient ?? Supabase.instance.client;
 
   Future<List<Map<String, dynamic>>> fetchActiveTrips() async {
     final response =

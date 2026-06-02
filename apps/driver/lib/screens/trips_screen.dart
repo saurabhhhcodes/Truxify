@@ -17,17 +17,17 @@ class TripsScreen extends StatefulWidget {
 }
 
 class _TripsScreenState extends State<TripsScreen> {
-  final TripService _tripService = TripService();
+  late final TripService _tripService;
 
-  List<Map<String, dynamic>> _activeTrips = [];
-  List<Map<String, dynamic>> _tripItems = [];
-  List<Map<String, dynamic>> _tripStops = [];
-  List<Map<String, dynamic>> _routePoints = [];
+  List<Map<String, dynamic>> _trips = [];
+  Map<String, List<Map<String, dynamic>>> _tripStopsByTripId = {};
+  Map<String, List<Map<String, dynamic>>> _routePointsByTripId = {};
 
   bool _isLoadingTrips = true;
-  int _selectedChipIndex = 0; // 0: All, 1: Active, 2: Completed, 3: Cancelled
-  int _selectedSortIndex =
-      0; // 0: Newest, 1: Oldest, 2: Highest, 3: Lowest, 4: By status
+  int _selectedChipIndex = 0;
+  int _selectedSortIndex = 0;
+
+  // 0: Newest, 1: Oldest, 2: Highest, 3: Lowest, 4: By status
 
   final List<String> _statusFilters = [
     'All',
@@ -39,6 +39,7 @@ class _TripsScreenState extends State<TripsScreen> {
   @override
   void initState() {
     super.initState();
+    _tripService = TripService();
     _loadTrips();
   }
 
@@ -46,43 +47,37 @@ class _TripsScreenState extends State<TripsScreen> {
     try {
       final trips = await _tripService.fetchTrips();
 
-      List<Map<String, dynamic>> items = [];
-      List<Map<String, dynamic>> stops = [];
-      List<Map<String, dynamic>> routePoints = [];
+      final stopsByTrip = <String, List<Map<String, dynamic>>>{};
+      final routePointsByTrip = <String, List<Map<String, dynamic>>>{};
 
-      if (trips.isNotEmpty) {
-        final tripDisplayId = trips.first['trip_display_id'].toString();
+      for (final trip in trips) {
+        final tripId = trip['trip_display_id'].toString();
 
-        items = await _tripService.fetchTripItems(tripDisplayId);
-        debugPrint('Fetched trip items: ${items.length}');
+        stopsByTrip[tripId] = await _tripService.fetchTripStops(tripId);
 
-        stops = await _tripService.fetchTripStops(tripDisplayId);
-        debugPrint('Fetched trip stops: ${stops.length}');
-
-        routePoints = await _tripService.fetchRouteMapPoints(tripDisplayId);
-        debugPrint('Fetched route points: ${routePoints.length}');
+        routePointsByTrip[tripId] =
+            await _tripService.fetchRouteMapPoints(tripId);
       }
-
-      debugPrint('Fetched trips: ${trips.length}');
+      if (!mounted) return;
 
       setState(() {
-        _activeTrips = trips;
-        _tripItems = items;
-        _tripStops = stops;
-        _routePoints = routePoints;
+        _trips = trips;
+        _tripStopsByTripId = stopsByTrip;
+        _routePointsByTripId = routePointsByTrip;
         _isLoadingTrips = false;
       });
     } catch (e) {
       debugPrint("Failed to load trips: $e");
-
+      if (!mounted) return;
       setState(() {
         _isLoadingTrips = false;
       });
     }
   }
 
-  Future<void> _completeCurrentStop() async {
-    final currentStop = _tripStops.firstWhere(
+  Future<void> _completeCurrentStop(String tripId) async {
+    final stops = _tripStopsByTripId[tripId] ?? [];
+    final currentStop = stops.firstWhere(
       (stop) => stop['is_current'] == true,
       orElse: () => {},
     );
@@ -111,7 +106,7 @@ class _TripsScreenState extends State<TripsScreen> {
   }
 
   List<Trip> _mapSupabaseTripsToUiTrips() {
-    return _activeTrips.map((row) {
+    return _trips.map((row) {
       return Trip(
         route: row['route_label']?.toString() ?? 'Unknown route',
         date: row['trip_date']?.toString() ?? '',
@@ -139,7 +134,7 @@ class _TripsScreenState extends State<TripsScreen> {
   }
 
   List<Trip> _getFilteredAndSortedTrips() {
-    List<Trip> trips = List.from(mockTrips);
+    List<Trip> trips = _mapSupabaseTripsToUiTrips();
 
     // Filter by status
     if (_selectedChipIndex > 0) {
@@ -341,7 +336,7 @@ class _TripsScreenState extends State<TripsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final allTrips = _activeTrips.isNotEmpty
+    final allTrips = _trips.isNotEmpty
         ? _mapSupabaseTripsToUiTrips()
         : _getFilteredAndSortedTrips();
 
@@ -351,7 +346,7 @@ class _TripsScreenState extends State<TripsScreen> {
             .where((trip) =>
                 trip.status == _getStatusFromIndex(_selectedChipIndex))
             .toList();
-    debugPrint('Supabase trips count: ${_activeTrips.length}');
+    debugPrint('Supabase trips count: ${_trips.length}');
 
     return SafeArea(
       child: Scaffold(
@@ -546,8 +541,9 @@ class _TripsScreenState extends State<TripsScreen> {
     );
   }
 
-  Widget _buildLiveStopsPreview() {
-    if (_tripStops.isEmpty) {
+  Widget _buildLiveStopsPreview(String tripId) {
+    final stops = _tripStopsByTripId[tripId] ?? [];
+    if (stops.isEmpty) {
       return const SizedBox.shrink();
     }
 
@@ -555,11 +551,11 @@ class _TripsScreenState extends State<TripsScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SizedBox(height: 8),
-        if (_tripStops.any((stop) => stop['is_current'] == true))
+        if (stops.any((stop) => stop['is_current'] == true))
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: _completeCurrentStop,
+              onPressed: () => _completeCurrentStop(tripId),
               style: ElevatedButton.styleFrom(
                 backgroundColor: TruxifyColors.accent,
               ),
@@ -576,7 +572,7 @@ class _TripsScreenState extends State<TripsScreen> {
           ),
         ),
         const SizedBox(height: 6),
-        ..._tripStops.map((stop) {
+        ...stops.map((stop) {
           final isCompleted = stop['is_completed'] == true;
           final isCurrent = stop['is_current'] == true;
 
@@ -596,6 +592,7 @@ class _TripsScreenState extends State<TripsScreen> {
   }
 
   Widget _buildTripCard(BuildContext context, Trip trip) {
+    final routePoints = _routePointsByTripId[trip.tripId] ?? [];
     Color statusColor;
     Color statusBgColor;
     String statusLabel;
@@ -662,83 +659,10 @@ class _TripsScreenState extends State<TripsScreen> {
                       // Small route thumbnail (OSM)
                       SizedBox(
                         height: 86,
-                        child: _routePoints.isEmpty
-                            ? Container(
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFF0E8E8),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: const Center(
-                                    child: Icon(Icons.map_outlined,
-                                        color: Colors.grey)),
-                              )
-                            : ClipRRect(
-                                borderRadius: BorderRadius.circular(8),
-                                child: FlutterMap(
-                                  options: MapOptions(
-                                    initialCenter: ll.LatLng(
-                                      (_routePoints.first['latitude'] as num)
-                                          .toDouble(),
-                                      (_routePoints.first['longitude'] as num)
-                                          .toDouble(),
-                                    ),
-                                    initialZoom: 6.0,
-                                    interactionOptions:
-                                        const InteractionOptions(
-                                      flags: InteractiveFlag.none,
-                                    ),
-                                  ),
-                                  children: [
-                                    TileLayer(
-                                      urlTemplate:
-                                          'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                                      userAgentPackageName:
-                                          'com.truxify.driver',
-                                    ),
-                                    PolylineLayer(
-                                      polylines: [
-                                        Polyline(
-                                          points: _routePoints.map((point) {
-                                            return ll.LatLng(
-                                              (point['latitude'] as num)
-                                                  .toDouble(),
-                                              (point['longitude'] as num)
-                                                  .toDouble(),
-                                            );
-                                          }).toList(),
-                                          strokeWidth: 4,
-                                          color: TruxifyColors.accent,
-                                        ),
-                                      ],
-                                    ),
-                                    MarkerLayer(
-                                      markers: _routePoints.map((point) {
-                                        return Marker(
-                                          point: ll.LatLng(
-                                            (point['latitude'] as num)
-                                                .toDouble(),
-                                            (point['longitude'] as num)
-                                                .toDouble(),
-                                          ),
-                                          width: 12,
-                                          height: 12,
-                                          child: Container(
-                                            decoration: BoxDecoration(
-                                              shape: BoxShape.circle,
-                                              color: point['is_claimed'] == true
-                                                  ? TruxifyColors.success
-                                                  : TruxifyColors.accent,
-                                            ),
-                                          ),
-                                        );
-                                      }).toList(),
-                                    ),
-                                  ],
-                                ),
-                              ),
+                        child: _buildRouteMap(routePoints),
                       ),
                       const SizedBox(height: 8),
-                      _buildLiveStopsPreview(),
+                      _buildLiveStopsPreview(trip.tripId),
                       const SizedBox(height: 8),
                       // Top Row
                       Row(
@@ -854,6 +778,75 @@ class _TripsScreenState extends State<TripsScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildRouteMap(List<Map<String, dynamic>> routePoints) {
+    if (routePoints.isEmpty) {
+      return Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFFF0E8E8),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: const Center(
+          child: Icon(Icons.map_outlined, color: Colors.grey),
+        ),
+      );
+    }
+
+    final points = routePoints.map((point) {
+      return ll.LatLng(
+        (point['latitude'] as num).toDouble(),
+        (point['longitude'] as num).toDouble(),
+      );
+    }).toList();
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: FlutterMap(
+        options: MapOptions(
+          initialCenter: points.first,
+          initialZoom: 6.0,
+          interactionOptions: const InteractionOptions(
+            flags: InteractiveFlag.none,
+          ),
+        ),
+        children: [
+          TileLayer(
+            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+            userAgentPackageName: 'com.truxify.driver',
+          ),
+          PolylineLayer(
+            polylines: [
+              Polyline(
+                points: points,
+                strokeWidth: 4,
+                color: TruxifyColors.accent,
+              ),
+            ],
+          ),
+          MarkerLayer(
+            markers: routePoints.map((point) {
+              return Marker(
+                point: ll.LatLng(
+                  (point['latitude'] as num).toDouble(),
+                  (point['longitude'] as num).toDouble(),
+                ),
+                width: 12,
+                height: 12,
+                child: Container(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: point['is_claimed'] == true
+                        ? TruxifyColors.success
+                        : TruxifyColors.accent,
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ],
       ),
     );
   }
