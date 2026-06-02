@@ -1,7 +1,7 @@
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:truxify/widgets/order_card.dart';
-
+import '../services/order_service.dart';
 import '../constants/app_colors.dart';
 import '../controllers/app_controller.dart';
 import '../core/offline/cache/cache_manager.dart';
@@ -12,6 +12,7 @@ import '../widgets/app_page_route.dart';
 import '../widgets/order_search_bar.dart';
 import 'live_tracking_screen.dart';
 import 'order_detail_screen.dart';
+import 'package:flutter/foundation.dart';
 
 class OrdersScreen extends StatefulWidget {
   const OrdersScreen({super.key});
@@ -20,7 +21,9 @@ class OrdersScreen extends StatefulWidget {
   State<OrdersScreen> createState() => _OrdersScreenState();
 }
 
-class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderStateMixin {
+class _OrdersScreenState extends State<OrdersScreen>
+    with SingleTickerProviderStateMixin {
+  late final OrderService _orderService;
   late final TabController _tabController;
   TruxifyController? _controller;
   final TextEditingController _searchController = TextEditingController();
@@ -29,12 +32,15 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
   final CacheManager _cacheManager = CacheManager();
   bool _isOffline = false;
   String? _lastUpdatedLabel;
-  List<ActiveOrderData> _activeOrders = List<ActiveOrderData>.from(mockActiveOrders);
-  List<HistoryOrderData> _historyOrders = List<HistoryOrderData>.from(mockHistoryOrders);
+  List<ActiveOrderData> _activeOrders = [];
+  List<HistoryOrderData> _historyOrders = [];
 
   @override
   void initState() {
-        _tabController = TabController(length: 2, vsync: this);
+    super.initState();
+
+    _orderService = OrderService();
+    _tabController = TabController(length: 2, vsync: this);
     _tabController.addListener(() {
       if (!_tabController.indexIsChanging) {
         _controller?.setOrdersTab(_tabController.index);
@@ -62,77 +68,85 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
   Future<void> _loadOrders() async {
     final connectivity = await Connectivity().checkConnectivity();
     final hasNetwork = connectivity != ConnectivityResult.none;
-    await _cacheManager.open();
 
-    await _cacheManager.cacheOrders(
-      [
-        ...mockActiveOrders.map((order) => {
-          'id': order.orderId,
-          'status': 'active',
-          'route': order.route,
-          'driver': order.driver,
-          'milestone': order.milestone,
-          'eta': order.eta,
-        }),
-        ...mockHistoryOrders.map((order) => {
-          'id': order.orderId,
-          'status': order.status.toLowerCase(),
-          'route': order.route,
-          'amount': order.amount,
-          'date': order.date,
-          'driver': order.driver,
-          'truckNumber': order.truckNumber,
-        }),
-      ],
-    );
-
-    for (final order in <dynamic>[...mockActiveOrders, ...mockHistoryOrders]) {
-      final orderId = order.orderId as String;
-      final historyOrder = mockHistoryOrders.where((item) => item.orderId == orderId).firstOrNull;
-      final timeline = (historyOrder?.timeline ?? const []).map((step) => {
-        'title': step.title,
-        'completed': step.completed,
-      }).toList();
-      if (timeline.isNotEmpty) {
-        await _cacheManager.cacheMilestones(orderId, timeline);
-      }
+    if (!kIsWeb) {
+      await _cacheManager.open();
     }
 
-    final cachedOrders = await _cacheManager.getOrders(limit: 50);
-    final updatedAt = await _cacheManager.getLastUpdatedLabel('orders');
-    if (!mounted) return;
+    try {
+      if (hasNetwork) {
+        final activeOrders = await _orderService.fetchActiveOrders();
+        debugPrint("Supabase active orders: $activeOrders");
+        final historyOrders = await _orderService.fetchHistoryOrders();
+        debugPrint("Supabase history orders: $historyOrders");
 
-    setState(() {
-      _isOffline = !hasNetwork;
-      _lastUpdatedLabel = updatedAt;
-      if (!hasNetwork && cachedOrders.isNotEmpty) {
-        _activeOrders = cachedOrders
-            .where((item) => item['status'] == 'active' || item['status'] == 'in_transit')
-            .map((item) => ActiveOrderData(
-                  orderId: item['id']?.toString() ?? '#FF000000',
-                  route: item['route']?.toString() ?? 'Unknown route',
-                  driver: item['driver']?.toString() ?? 'Driver unavailable',
-                  milestone: item['milestone']?.toString() ??
-                      (mockHistoryOrders.where((entry) => entry.orderId == item['id']).firstOrNull?.timeline.lastOrNull?.title ?? 'In Transit'),
-                  eta: item['eta']?.toString() ?? 'Today',
-                  status: item['status']?.toString() ?? 'Active',
-                ))
-            .toList();
-        _historyOrders = cachedOrders
-            .where((item) => item['status'] != 'active' && item['status'] != 'in_transit')
-            .map((item) => HistoryOrderData(
-                  orderId: item['id']?.toString() ?? '#FF000000',
-                  route: item['route']?.toString() ?? 'Unknown route',
-                  date: item['date']?.toString() ?? '',
-                  amount: item['amount']?.toString() ?? '₹0',
-                  status: item['status']?.toString() == 'delivered' ? 'Delivered' : 'Cancelled',
-                  driver: item['driver']?.toString() ?? 'Driver unavailable',
-                  truckNumber: item['truckNumber']?.toString() ?? '',
-                  timeline: const [],
-                ))
-            .toList();
+        // cache latest data
+        String? updatedAt;
+
+        if (!kIsWeb) {
+          await _cacheManager.cacheOrders([
+            ...activeOrders,
+            ...historyOrders,
+          ]);
+
+          updatedAt = await _cacheManager.getLastUpdatedLabel('orders');
+        }
+        if (!mounted) return;
+
+        setState(() {
+          _isOffline = false;
+          _lastUpdatedLabel = updatedAt;
+
+          _activeOrders = activeOrders.map((order) {
+            return ActiveOrderData(
+              orderId: order['order_display_id']?.toString() ?? '',
+              route: '${order['pickup_address']} → ${order['drop_address']}',
+              driver: order['driver_id']?.toString() ?? 'Not Assigned',
+              milestone: order['status']?.toString() ?? 'Pending',
+              eta: order['eta']?.toString() ?? '',
+              status: order['status']?.toString() ?? '',
+            );
+          }).toList();
+
+          _historyOrders = historyOrders.map((order) {
+            return HistoryOrderData(
+              orderId: order['order_display_id']?.toString() ?? '',
+              route: '${order['pickup_address']} → ${order['drop_address']}',
+              date: order['pickup_date']?.toString() ?? '',
+              amount: '₹${order['total_amount'] ?? 0}',
+              status: order['status']?.toString() ?? '',
+              driver: order['driver_id']?.toString() ?? '',
+              truckNumber: order['truck_id']?.toString() ?? '',
+              timeline: const [],
+            );
+          }).toList();
+        });
+      } else {
+        if (!kIsWeb) {
+          final cachedOrders = await _cacheManager.getOrders(limit: 50);
+          final updatedAt = await _cacheManager.getLastUpdatedLabel('orders');
+
+          if (!mounted) return;
+
+          setState(() {
+            _isOffline = true;
+            _lastUpdatedLabel = updatedAt;
+
+            debugPrint(
+              'Loaded ${cachedOrders.length} cached orders in offline mode',
+            );
+          });
+        } else {
+          if (!mounted) return;
+
+          setState(() {
+            _isOffline = true;
+          });
+        }
       }
-    });
+    } catch (e) {
+      debugPrint('Failed to load orders: $e');
+    }
   }
 
   @override
@@ -141,9 +155,11 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
     final controller = TruxifyScope.of(context);
     _controller = controller;
 
-    if (_tabController.index != controller.ordersTabIndex && !_tabController.indexIsChanging) {
+    if (_tabController.index != controller.ordersTabIndex &&
+        !_tabController.indexIsChanging) {
       _tabController.animateTo(controller.ordersTabIndex);
     }
+    _loadOrders();
   }
 
   @override
@@ -234,7 +250,10 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
               padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
               child: Text(
                 'Offline mode • Last updated ${_formatLastUpdated(_lastUpdatedLabel)}',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(color: TruxifyColors.accentDark),
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: TruxifyColors.accentDark),
               ),
             ),
           Expanded(
@@ -250,7 +269,9 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
                     return ActiveOrderCard(
                       order: order,
                       onTap: () => Navigator.of(context).push(
-                        AppPageRoute(builder: (_) => LiveTrackingScreen(orderId: order.orderId)),
+                        AppPageRoute(
+                            builder: (_) =>
+                                LiveTrackingScreen(orderId: order.orderId)),
                       ),
                     );
                   },
@@ -264,7 +285,8 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
                     return HistoryOrderCard(
                       order: order,
                       onTap: () => Navigator.of(context).push(
-                        AppPageRoute(builder: (_) => OrderDetailScreen(order: order)),
+                        AppPageRoute(
+                            builder: (_) => OrderDetailScreen(order: order)),
                       ),
                     );
                   },
