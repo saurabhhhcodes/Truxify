@@ -11,7 +11,7 @@ class MarketplaceRepository {
     SupabaseClient? client,
     http.Client? httpClient,
     String? apiBaseUrl,
-  })  : _client = client ?? Supabase.instance.client,
+  })  : _providedClient = client,
         _httpClient = httpClient ?? http.Client(),
         _apiBaseUrl = (apiBaseUrl ?? defaultApiBaseUrl).replaceFirst(
           RegExp(r'/$'),
@@ -23,7 +23,8 @@ class MarketplaceRepository {
     defaultValue: 'http://localhost:5000',
   );
 
-  final SupabaseClient _client;
+  final SupabaseClient? _providedClient;
+  SupabaseClient get _client => _providedClient ?? Supabase.instance.client;
   final http.Client _httpClient;
   final String _apiBaseUrl;
 

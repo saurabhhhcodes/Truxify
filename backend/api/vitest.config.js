@@ -11,6 +11,17 @@
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  plugins: [
+    {
+      name: 'remove-shebang',
+      enforce: 'pre',
+      transform(code, id) {
+        if (id.endsWith('.js') || id.endsWith('.ts')) {
+          return code.replace(/^#!\/.*/, '');
+        }
+      },
+    },
+  ],
   test: {
     environment: 'node',
     globals: true,
@@ -24,3 +35,4 @@ export default defineConfig({
     },
   },
 });
+
