@@ -20,7 +20,7 @@ describe('profileCache utility', () => {
       vi.doMock('../../src/config/db.js', () => ({}));
 
       const { getCachedProfile, setCachedProfile, invalidateCachedProfile } = await import('../../src/lib/profileCache.js');
-      
+
       const profile = await getCachedProfile('some-uid');
       expect(profile).toBeNull();
       

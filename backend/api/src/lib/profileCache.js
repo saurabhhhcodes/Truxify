@@ -4,14 +4,6 @@ export const TTL_SECONDS = 900; // 15 minutes
 export const TOMBSTONE_TTL_SECONDS = 30; // 30 seconds
 const cacheKey = (firebaseUid) => `user:profile:${firebaseUid}`;
 
-/**
- * Retrieves the redisClient from the database configuration.
- * Under Vitest, accessing a property on a mocked namespace module that is not explicitly
- * returned in the mock factory will throw an error via the mock Proxy. We wrap the access
- * in a try-catch to allow a graceful fallback to null.
- * 
- * @returns {object|null} The Redis client if configured, or null.
- */
 const LAST_LOG_TIMES = {};
 const LOG_THROTTLE_INTERVAL_MS = 60000; // 60 seconds
 
@@ -28,17 +20,20 @@ function logCacheError(operation, error) {
   }
 }
 
+/**
+ * Retrieves the redisClient from the database configuration.
+ * Under Vitest, accessing a property on a mocked namespace module that is not explicitly
+ * returned in the mock factory will throw an error via the mock Proxy. We wrap the access
+ * in a try-catch to allow a graceful fallback to null.
+ * 
+ * @returns {object|null} The Redis client if configured, or null.
+ */
 function getRedisClient() {
-  if (process.env.VITEST === 'true') {
-    // Under Vitest testing, accessing undefined keys on namespace mock proxies throws.
-    // We wrap the access in a try-catch to allow a graceful fallback to null.
-    try {
-      return db.redisClient ?? null;
-    } catch {
-      return null;
-    }
+  try {
+    return db.redisClient ?? null;
+  } catch {
+    return null;
   }
-  return db.redisClient ?? null;
 }
 
 /**
