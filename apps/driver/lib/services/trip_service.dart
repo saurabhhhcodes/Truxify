@@ -46,6 +46,19 @@ class TripService {
     };
   }
 
+  Future<void> _verifyTripOwnership(String tripDisplayId) async {
+    final tripCheck = await _client
+        .from('trips')
+        .select('id')
+        .eq('trip_display_id', tripDisplayId)
+        .eq('driver_id', _driverId)
+        .maybeSingle();
+
+    if (tripCheck == null) {
+      throw Exception('Unauthorized access to trip data');
+    }
+  }
+
   Future<List<Map<String, dynamic>>> fetchTrips({String? status}) async {
     var uriString = '$_apiBaseUrl/api/trips';
     if (status != null) {
@@ -108,6 +121,8 @@ class TripService {
     String stopId,
     String tripDisplayId,
   ) async {
+    await _verifyTripOwnership(tripDisplayId);
+
     final updatedStop = await _client.from('trip_stops').update({
       'is_completed': true,
       'is_current': false,
@@ -156,6 +171,8 @@ class TripService {
   }
 
   Future<void> startTrip(String tripDisplayId) async {
+    await _verifyTripOwnership(tripDisplayId);
+
     // Find the first stop of this trip that is not completed
     final stops = await _client
         .from('trip_stops')

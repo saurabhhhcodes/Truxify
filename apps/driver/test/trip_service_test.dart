@@ -265,6 +265,25 @@ void main() {
       expect(updatedTrips.isEmpty, isTrue); // Trip not completed
     });
 
+    test('Throws exception if driver does not own the trip', () async {
+      final client = FakeSupabaseClient(
+        onFrom: (relation) {
+          if (relation == 'trips') {
+            // Return null for ownership check
+            return FakeSupabaseQueryBuilder(Future.value(null));
+          }
+          throw UnimplementedError('Table $relation should not be queried');
+        },
+      );
+
+      final service = TripService(client: client, httpClient: createUnusedHttpClient());
+
+      expect(
+        () => service.markStopCompleted(stopId, tripDisplayId),
+        throwsA(isA<Exception>().having((e) => e.toString(), 'message', contains('Unauthorized access to trip data'))),
+      );
+    });
+
   });
 
   group('TripService.updateOnlineStatus Tests', () {
@@ -321,7 +340,12 @@ void main() {
 
       final client = FakeSupabaseClient(
         onFrom: (relation) {
-          if (relation == 'trip_stops') {
+          if (relation == 'trips') {
+            return FakeSupabaseQueryBuilder(
+              Future.value([{'id': 'trip-id-123'}]),
+              onEq: (col, val) => eqParams[col] = val,
+            );
+          } else if (relation == 'trip_stops') {
             tripStopsCallCount++;
             if (tripStopsCallCount == 1) {
               // Fetch first stop
@@ -346,12 +370,17 @@ void main() {
       await service.startTrip(tripDisplayId);
 
       expect(updatedStops.first['is_current'], isTrue);
+      expect(eqParams['trip_display_id'], equals(tripDisplayId));
     });
 
     test('Throws exception if startTrip finds no active stops', () async {
       final client = FakeSupabaseClient(
         onFrom: (relation) {
-          if (relation == 'trip_stops') {
+          if (relation == 'trips') {
+            return FakeSupabaseQueryBuilder(
+              Future.value([{'id': 'trip-id-123'}]),
+            );
+          } else if (relation == 'trip_stops') {
             return FakeSupabaseQueryBuilder(
               Future.value(<Map<String, dynamic>>[]),
             );
