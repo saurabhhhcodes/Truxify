@@ -185,7 +185,7 @@ class DriverEarningsService {
 
     final http.Response response;
     try {
-      response = await _httpClient.get(uri, headers: _authHeaders);
+      response = await _httpClient.get(uri, headers: await _authHeaders);
     } catch (e) {
       throw Exception('Network error: Failed to fetch today\'s earnings.');
     }
@@ -222,7 +222,7 @@ class DriverEarningsService {
 
     final http.Response response;
     try {
-      response = await _httpClient.get(uri, headers: _authHeaders);
+      response = await _httpClient.get(uri, headers: await _authHeaders);
     } catch (e) {
       throw Exception('Network error: Failed to fetch driver stats.');
     }
