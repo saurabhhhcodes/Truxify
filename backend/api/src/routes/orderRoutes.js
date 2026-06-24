@@ -842,8 +842,6 @@ router.post('/:id/verify-delivery', authenticate, userLimiter, requireRole(['dri
   const orderId = req.params.id;
   const { otp } = req.body;
 
-  if (!otp) return res.status(400).json({ error: 'OTP is required for verification.' });
-
   // Check for active lockout from previous failed attempts
   if (await checkOtpLockout(orderId)) {
     return res.status(429).json({
