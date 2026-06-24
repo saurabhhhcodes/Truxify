@@ -1003,6 +1003,25 @@ router.put('/:id/change-drop', authenticate, userLimiter, requireRole(['customer
     const { data: updatedOrder, error: updateErr } = await supabase.from('orders').update(updates).eq('order_display_id', orderId).select('*').single();
     if (updateErr) return res.status(500).json({ error: 'Failed to update order.', details: updateErr.message });
 
+    const { error: offerUpdateErr } = await supabase
+      .from('load_offers')
+      .update({
+        drop_address,
+        drop_lat: Number(drop_lat),
+        drop_lng: Number(drop_lng),
+        route_label: `${(order.pickup_address || '').split(',')[0]} → ${drop_address.split(',')[0]}`,
+        freight_value: pricing.baseFreight,
+        fuel_cost: pricing.fuelCost,
+        toll_cost: pricing.tollEstimate,
+        net_profit: pricing.netProfit,
+        extra_distance_km: pricing.distanceKm,
+      })
+      .eq('order_display_id', orderId);
+
+    if (offerUpdateErr) {
+      logger.error('Load offer update failed for change-drop:', offerUpdateErr.message);
+    }
+
     try {
       await supabase.from('order_timeline').insert({ order_display_id: order.order_display_id, milestone: 'Drop Changed', milestone_time: new Date().toISOString(), completed: true, sort_order: 25 });
     } catch (timelineErr) {
