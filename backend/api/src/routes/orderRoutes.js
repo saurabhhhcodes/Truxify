@@ -22,7 +22,14 @@ import {
 import { awardReputationPoints } from '../services/reputation.js';
 import { predictDemand, predictPrice } from '../services/ml.js';
 import { changeDropSchema, cancelOrderSchema } from '../validation/requestSchemas.js';
-import { buildDepositTx, recordDepositTx, escrowRelease, escrowRefund, ESCROW_MATIC_PER_PAISA } from '../services/escrow.js';
+import {
+  buildDepositTx,
+  recordDepositTx,
+  escrowRelease,
+  submitEscrowRefund,
+  confirmEscrowRefund,
+  ESCROW_MATIC_PER_PAISA,
+} from '../services/escrow.js';
 import { sendDeliveryOtpNotification, storeDeliveryOtp, getActiveDeliveryOtp, verifyDeliveryOtp, expireDeliveryOtps } from '../services/notificationService.js';
 import logger from '../middleware/logger.js';
 
@@ -145,7 +152,7 @@ function generateOrderDisplayId() {
   const prefix = '#FF';
   const now = new Date();
   const dateStr = now.toISOString().slice(0, 10).replace(/-/g, ''); // YYYYMMDD
-  const random = Math.floor(1000 + Math.random() * 9000); // 4 random digits
+  const random = Math.floor(100000 + Math.random() * 900000); // 6 random digits
   return `${prefix}${dateStr}${random}`;
 }
 
@@ -709,7 +716,7 @@ router.post('/:id/bids/:bidId/accept', authenticate, userLimiter, requireRole(['
           return res.status(400).json({ error: 'Computed escrow amount exceeds safety cap. Check ESCROW_MATIC_PER_PAISA configuration.' });
         }
         const amountWei = ethers.parseEther(maticAmount);
-        const { txData } = await buildDepositTx(
+        const { txData, bookingId } = await buildDepositTx(
           order.order_display_id, customerWallet, driverWallet, amountWei,
         );
         if (txData) {
@@ -731,7 +738,7 @@ router.post('/:id/bids/:bidId/accept', authenticate, userLimiter, requireRole(['
             depositTxData = txData;
           }
           await supabase.from('orders').update({
-            escrow_booking_id: `escrow:${order.order_display_id}`,
+            escrow_booking_id: bookingId,
             escrow_status: 'funding',
           }).eq('id', orderId);
         }
@@ -851,8 +858,6 @@ router.post('/:id/verify-delivery', authenticate, userLimiter, requireRole(['dri
   const orderId = req.params.id;
   const { otp } = req.body;
 
-  if (!otp) return res.status(400).json({ error: 'OTP is required for verification.' });
-
   // Check for active lockout from previous failed attempts
   if (await checkOtpLockout(orderId)) {
     return res.status(429).json({
@@ -886,10 +891,6 @@ router.post('/:id/verify-delivery', authenticate, userLimiter, requireRole(['dri
       return res.status(400).json({ error: message });
     }
 
-    // Successful verification — clear failure state
-    await clearOtpState(orderId);
-    await verifyDeliveryOtp(orderId);
-
     const { data: preUpdatedOrder, error: updateErr } = await supabase.from('orders').update({
       updated_at: new Date().toISOString()
     })
@@ -913,8 +914,11 @@ router.post('/:id/verify-delivery', authenticate, userLimiter, requireRole(['dri
       return res.status(500).json({ error: 'Failed to complete trip and release payment.', details: rpcErr.message });
     }
 
-
+    // OTP is only consumed after the RPC succeeds — if the RPC fails the driver can retry
+    await verifyDeliveryOtp(orderId);
+    await clearOtpState(orderId);
     // Escrow: release funds to driver after successful delivery verification
+    let escrowReleased = false;
     if (order.escrow_status === 'funded') {
       const releaseAttemptedAt = new Date().toISOString();
       const releaseAttempts = (order.escrow_release_attempts || 0) + 1;
@@ -974,6 +978,7 @@ router.post('/:id/verify-delivery', authenticate, userLimiter, requireRole(['dri
               walletErr.message
             );
           }
+          escrowReleased = true;
         }
       } catch (releaseErr) {
         logger.error('[escrow] Release failed for order', orderId, ':', releaseErr.message);
@@ -999,11 +1004,11 @@ router.post('/:id/verify-delivery', authenticate, userLimiter, requireRole(['dri
       logger.info(`[escrow] Escrow not funded (status: ${order.escrow_status}) — skipping on-chain release.`);
     }
 
-    res.json({
-      message: 'Delivery verified successfully! Payment released to driver.',
-      escrow_status: order.escrow_status === 'funded' ? 'released' : order.escrow_status,
-      payment_released: true,
-    });
+    if (order.escrow_status !== 'funded' || escrowReleased) {
+      res.json({ message: 'Delivery verified successfully! Payment released to driver.' });
+    } else {
+      res.status(500).json({ error: 'Delivery verified but on-chain escrow release failed. Contact support.' });
+    }
   } catch (err) {
     res.status(500).json({ error: 'Internal Server Error' });
   }
@@ -1170,42 +1175,146 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
       return res.status(409).json({ error: 'Cannot cancel: delivery OTP has already been verified.' });
     }
 
-    let refundTxHash = null;
-    // Phase 1: Process escrow refund BEFORE changing order status
-    if (order.escrow_status === 'funded') {
-      try {
-        const { txHash } = await escrowRefund(order.order_display_id);
-        refundTxHash = txHash;
-      } catch (refundErr) {
-        logger.error('[escrow] Refund failed for order', orderId, ':', refundErr.message);
-        return res.status(502).json({
-          error: 'Escrow refund failed. Order was not cancelled.',
-          details: 'The blockchain transaction could not be completed. Please try again or contact support.',
+    if (order.status === 'cancelled' && order.escrow_status === 'refunded') {
+      return res.json({
+        message: 'Order was already cancelled and refunded.',
+        cancellation_fee: order.cancellation_fee ?? 0,
+        order,
+      });
+    }
+
+    const requiresRefund = ['funded', 'refund_pending', 'refund_failed'].includes(order.escrow_status);
+    let workingOrder = order;
+
+    // Persist cancellation before touching the blockchain. A failed or delayed
+    // refund must never leave the order available for continued work.
+    if (requiresRefund && (order.status !== 'cancelled' || order.escrow_status !== 'refund_pending')) {
+      const attemptAt = new Date().toISOString();
+      const { data: pendingOrder, error: pendingErr } = await supabase
+        .from('orders')
+        .update({
+          status: 'cancelled',
+          cancellation_reason: reason ?? order.cancellation_reason,
+          escrow_status: 'refund_pending',
+          escrow_refund_error: null,
+          escrow_refund_attempts: (order.escrow_refund_attempts ?? 0) + 1,
+          escrow_refund_last_attempt_at: attemptAt,
+          updated_at: attemptAt,
+        })
+        .eq('order_display_id', orderId)
+        .not('status', 'in', '("delivered","payment_released")')
+        .select('*')
+        .single();
+
+      if (pendingErr) {
+        if (pendingErr.code === 'PGRST116') {
+          return res.status(409).json({ error: 'Order was already delivered or payment released. Cannot cancel.' });
+        }
+        return res.status(500).json({
+          error: 'Failed to place the order into refund reconciliation.',
+          details: pendingErr.message,
         });
       }
+      workingOrder = pendingOrder;
+    }
 
-      if (!refundTxHash) {
-        logger.error('[escrow] Refund returned null txHash for order', orderId);
-        return res.status(502).json({
-          error: 'Escrow refund could not be processed. Order was not cancelled.',
+    if (requiresRefund) {
+      let refundTxHash = workingOrder.refund_tx_hash ?? null;
+
+      try {
+        let receipt;
+
+        if (refundTxHash) {
+          receipt = await confirmEscrowRefund(refundTxHash);
+        } else {
+          const submitted = await submitEscrowRefund(order.order_display_id);
+          refundTxHash = submitted.txHash;
+          if (!refundTxHash || !submitted.waitForConfirmation) {
+            throw new Error('Escrow refund transaction was not submitted.');
+          }
+
+          const submittedAt = new Date().toISOString();
+          const { error: hashErr } = await supabase
+            .from('orders')
+            .update({
+              refund_tx_hash: refundTxHash,
+              escrow_refund_submitted_at: submittedAt,
+              updated_at: submittedAt,
+            })
+            .eq('order_display_id', orderId)
+            .eq('escrow_status', 'refund_pending');
+
+          if (hashErr) {
+            logger.error('[escrow] Failed to persist refund tx hash for order', orderId, ':', hashErr.message);
+          }
+          receipt = await submitted.waitForConfirmation();
+        }
+
+        const refundedAt = new Date().toISOString();
+        const { data: updatedOrder, error: updateErr } = await supabase
+          .from('orders')
+          .update({
+            status: 'cancelled',
+            cancellation_reason: reason ?? workingOrder.cancellation_reason,
+            escrow_status: 'refunded',
+            refund_tx_hash: receipt.hash ?? refundTxHash,
+            escrow_refunded_at: refundedAt,
+            escrow_refund_error: null,
+            updated_at: refundedAt,
+          })
+          .eq('order_display_id', orderId)
+          .in('escrow_status', ['refund_pending', 'refund_failed'])
+          .select('cancellation_fee, order_display_id, status, cancellation_reason, escrow_status, refund_tx_hash')
+          .single();
+
+        if (updateErr) {
+          logger.error('[escrow] Refund confirmed but final order update failed for', orderId, ':', updateErr.message);
+          return res.status(202).json({
+            message: 'Order cancelled and escrow refund confirmed. Database reconciliation is pending.',
+            refund_tx_hash: receipt.hash ?? refundTxHash,
+            escrow_status: 'refund_pending',
+            reconciliation_required: true,
+          });
+        }
+
+        await supabase.from('order_timeline').update({ completed: true, milestone_time: refundedAt })
+          .eq('order_display_id', order.order_display_id)
+          .eq('milestone', 'Order Placed');
+
+        return res.json({
+          message: 'Order cancelled and escrow refunded successfully.',
+          cancellation_fee: updatedOrder?.cancellation_fee ?? 0,
+          order: updatedOrder,
+        });
+      } catch (refundErr) {
+        logger.error('[escrow] Refund failed for order', orderId, ':', refundErr.message);
+        const failedAt = new Date().toISOString();
+        const nextEscrowStatus = refundTxHash ? 'refund_pending' : 'refund_failed';
+        await supabase.from('orders').update({
+          status: 'cancelled',
+          escrow_status: nextEscrowStatus,
+          refund_tx_hash: refundTxHash,
+          escrow_refund_error: String(refundErr.message || refundErr).slice(0, 1000),
+          escrow_refund_last_attempt_at: failedAt,
+          updated_at: failedAt,
+        }).eq('order_display_id', orderId);
+
+        return res.status(202).json({
+          message: 'Order cancelled. Escrow refund requires reconciliation.',
+          escrow_status: nextEscrowStatus,
+          refund_tx_hash: refundTxHash,
+          retryable: true,
         });
       }
     } else if (order.escrow_booking_id) {
       logger.info(`[escrow] Escrow not funded (status: ${order.escrow_status}) — skipping on-chain refund.`);
     }
 
-    // Phase 2: Change order status to cancelled and update escrow record atomically
     const updatePayload = {
       status: 'cancelled',
       cancellation_reason: reason,
       updated_at: new Date().toISOString(),
     };
-
-    if (order.escrow_status === 'funded') {
-      updatePayload.escrow_status = 'refunded';
-      updatePayload.refund_tx_hash = refundTxHash;
-      updatePayload.escrow_refunded_at = new Date().toISOString();
-    }
 
     const { data: updatedOrder, error: updateErr } = await supabase.from('orders')
       .update(updatePayload)
@@ -1254,16 +1363,21 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requireRole(['cus
       return res.status(400).json({ error: 'Order is not in funding state' });
     }
 
-    const bookingId = `escrow:${order.order_display_id}`;
+    const bookingId = order.escrow_booking_id || `escrow:${order.order_display_id}`;
     const result = await recordDepositTx(bookingId, txHash);
 
     if (result.error) return res.status(422).json({ error: result.error });
 
-    await supabase.from('orders').update({
+    const { error: updateErr } = await supabase.from('orders').update({
       escrow_status: 'funded',
       deposit_tx_hash: result.txHash,
       escrow_deposited_at: new Date().toISOString(),
     }).eq('id', orderId);
+
+    if (updateErr) {
+      logger.error('[confirm-deposit] DB update failed:', updateErr.message);
+      return res.status(500).json({ error: 'Database update failed after deposit confirmation. Please contact support.' });
+    }
 
     res.json({ message: 'Escrow deposit confirmed', txHash: result.txHash });
   } catch (err) {
