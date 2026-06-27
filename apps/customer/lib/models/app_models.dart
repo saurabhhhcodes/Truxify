@@ -90,6 +90,7 @@ class TruckResultData {
     this.baseFreight,
     this.tollEstimate,
     this.platformFee,
+    this.truckNumber,
     this.isAiEstimate = false,
   });
 
@@ -132,6 +133,7 @@ class TruckResultData {
       baseFreight: baseFreightStr,
       tollEstimate: tollEstimateStr,
       platformFee: platformFeeStr,
+      truckNumber: json['truckNumber'] as String? ?? json['number_plate'] as String?,
       isAiEstimate: json['isAiEstimate'] as bool? ?? false,
     );
   }
@@ -148,6 +150,7 @@ class TruckResultData {
   final String? baseFreight;
   final String? tollEstimate;
   final String? platformFee;
+  final String? truckNumber;
   final bool isAiEstimate;
 }
 
