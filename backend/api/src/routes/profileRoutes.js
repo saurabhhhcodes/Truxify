@@ -14,8 +14,6 @@ import { invalidateCachedProfile, invalidateCachedSupabaseProfile } from '../lib
 import { validateParams } from '../middleware/validate.js';
 import { paramIdSchema } from '../validation/requestSchemas.js';
 import logger from '../middleware/logger.js';
-import { updateProfileSchema } from '../schemas/profile.js';
-import { updateWalletSchema } from '../validation/requestSchemas.js';
 
 const router = express.Router();
 
@@ -240,7 +238,6 @@ router.put('/fcm-token', authenticate, userLimiter, async (req, res) => {
   }
 });
 
-export default router;
 // GET DRIVER STATEMENT
 router.get('/driver/statement', authenticate, requireRole(['driver']), userLimiter, validateQuery(driverStatementSchema), async (req, res) => {
   const userId = req.user.id;
@@ -309,6 +306,9 @@ router.get('/driver/statement', authenticate, requireRole(['driver']), userLimit
     });
   } catch (err) {
     res.status(500).json({ error: 'Internal Server Error', details: err.message });
+  }
+});
+
 // ADMIN CACHE INVALIDATION
 // Invalidates the profile cache for a specific user, forcing the next
 // authenticated request to refetch from Supabase. Use this after admin

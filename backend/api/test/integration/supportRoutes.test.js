@@ -519,6 +519,9 @@ describe('Support Routes', () => {
       expect(res.status).toBe(200);
       expect(res.body).toHaveLength(1);
       expect(res.body[0].message).toBe('Hello');
+    });
+  });
+
   describe('GET /api/support/categories', () => {
     it('returns 200 with categories array and labels map - no auth required', async () => {
       const res = await request(buildApp())

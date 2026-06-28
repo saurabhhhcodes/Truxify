@@ -89,21 +89,6 @@ router.get('/faqs', async (req, res) => {
 });
 
 // ============================================================================
-// 2. LIST VALID TICKET CATEGORIES (PUBLIC)
-// ============================================================================
-const VALID_CATEGORIES = [
-  { value: 'billing', label: 'Billing and Payment', description: 'Issues related to payments, invoices, and charges' },
-  { value: 'booking', label: 'Booking and Orders', description: 'Issues related to load bookings and order management' },
-  { value: 'technical', label: 'Technical Issues', description: 'App crashes, bugs, and technical difficulties' },
-  { value: 'account', label: 'Account and Access', description: 'Login problems, account settings, and access issues' },
-  { value: 'general', label: 'General Inquiry', description: 'Questions and inquiries not covered by other categories' },
-];
-
-router.get('/categories', async (req, res) => {
-  res.json(VALID_CATEGORIES);
-});
-
-// ============================================================================
 // 3. CREATE SUPPORT TICKET (AUTHENTICATED USER)
 // ============================================================================
 router.post('/tickets', authenticate, userLimiter, validateBody(createTicketSchema), async (req, res) => {

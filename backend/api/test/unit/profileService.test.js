@@ -21,9 +21,9 @@ vi.mock('../../src/middleware/logger.js', () => ({
 const mockEqProfileMaybeSingle = vi.fn();
 const mockEqStatsMaybeSingle = vi.fn();
 const mockEqDriverMaybeSingle = vi.fn();
+const supabaseRef = vi.hoisted(() => ({ current: null }));
 
-vi.mock('../../src/config/db.js', () => ({
-  supabase: {
+const mockSupabase = {
     from: vi.fn((table) => {
       if (table === 'profiles') {
         return {
@@ -54,6 +54,15 @@ vi.mock('../../src/config/db.js', () => ({
       }
       return { select: vi.fn() };
     }),
+};
+
+function useMockSupabase() {
+  supabaseRef.current = mockSupabase;
+}
+
+vi.mock('../../src/config/db.js', () => ({
+  get supabase() {
+    return supabaseRef.current;
   },
 }));
 
@@ -69,6 +78,7 @@ describe('getProfile', () => {
   });
 
   it('returns profile data on successful query', async () => {
+    useMockSupabase();
     const mockData = { id: 'user-123', firebase_uid: 'fb-uid', role: 'driver', full_name: 'John', phone: '+919876543210' };
     mockEqProfileMaybeSingle.mockResolvedValueOnce({ data: mockData, error: null });
     const result = await getProfile('user-123');
@@ -76,6 +86,7 @@ describe('getProfile', () => {
   });
 
   it('throws when supabase query returns an error', async () => {
+    useMockSupabase();
     mockEqProfileMaybeSingle.mockResolvedValueOnce({ data: null, error: { message: 'Permission denied' } });
     await expect(getProfile('user-123')).rejects.toThrow('Permission denied');
   });
@@ -102,6 +113,7 @@ describe('getCustomerStats', () => {
   });
 
   it('returns customer stats on successful query', async () => {
+    useMockSupabase();
     const mockData = { total_orders: 42, total_saved: 8, co2_reduced_kg: 156.5 };
     mockEqStatsMaybeSingle.mockResolvedValueOnce({ data: mockData, error: null });
     const result = await getCustomerStats('user-456');
@@ -109,6 +121,7 @@ describe('getCustomerStats', () => {
   });
 
   it('throws when supabase query returns an error', async () => {
+    useMockSupabase();
     mockEqStatsMaybeSingle.mockResolvedValueOnce({ data: null, error: { message: 'Row not found' } });
     await expect(getCustomerStats('user-456')).rejects.toThrow('Row not found');
   });
@@ -135,6 +148,7 @@ describe('getDriverDetails', () => {
   });
 
   it('returns driver details on successful query', async () => {
+    useMockSupabase();
     const mockData = {
       truck_id: 'truck-01', rating: 4.7, total_trips: 150, completion_rate: 0.95,
       is_online: true, wallet_confirmed: 500000, wallet_pending: 12000, wallet_total: 512000,
@@ -145,6 +159,7 @@ describe('getDriverDetails', () => {
   });
 
   it('throws when supabase query returns an error', async () => {
+    useMockSupabase();
     mockEqDriverMaybeSingle.mockResolvedValueOnce({ data: null, error: { message: 'Driver profile not found' } });
     await expect(getDriverDetails('driver-789')).rejects.toThrow('Driver profile not found');
   });
