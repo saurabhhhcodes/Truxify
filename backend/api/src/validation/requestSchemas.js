@@ -60,7 +60,7 @@ export const createOrderSchema = z.object({
 }).strict();
 
 export const paramIdSchema = z.object({
-  id: z.string().min(1, "ID is required")
+  id: uuidSchema.or(z.string().min(1, "ID is required"))
 });
 
 // Strict UUID-only param schema for routes whose :id maps directly to orders.id (a uuid).
