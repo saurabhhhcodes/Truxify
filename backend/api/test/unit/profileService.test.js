@@ -56,13 +56,15 @@ const defaultMockSupabase = {
   }),
 };
 
-const supabaseRef = { current: defaultMockSupabase };
+supabaseRef.current = defaultMockSupabase;
 
 vi.mock('../../src/config/db.js', () => ({
   get supabase() {
     return supabaseRef.current;
   },
 }));
+
+const useMockSupabase = () => { supabaseRef.current = defaultMockSupabase; };
 
 import { getProfile, getCustomerStats, getDriverDetails } from '../../src/services/profileService.js';
 
