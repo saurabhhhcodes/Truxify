@@ -12,6 +12,10 @@ import {
 import { supabase } from '../config/db.js';
 import { ProfileModel } from '../models/ProfileModel.js';
 import { invalidateCachedProfile, invalidateCachedSupabaseProfile } from '../lib/profileCache.js';
+import { validateParams } from '../middleware/validate.js';
+import { paramIdSchema } from '../validation/requestSchemas.js';
+import logger from '../middleware/logger.js';
+
 const router = express.Router();
 
 // GET PROFILE
@@ -238,7 +242,7 @@ router.put('/fcm-token', authenticate, userLimiter, async (req, res) => {
 // GET DRIVER STATEMENT
 router.get('/driver/statement', authenticate, requireRole(['driver']), userLimiter, validateQuery(driverStatementSchema), async (req, res) => {
   const userId = req.user.id;
-  const { start_date, end_date, format } = req.query;
+  const { start_date, end_date, sort_by } = req.query;
 
   try {
     let query = supabase
@@ -299,6 +303,10 @@ router.get('/driver/statement', authenticate, requireRole(['driver']), userLimit
       const csvString = csvRows.map(row => row.map(val => `"${String(val).replace(/"/g, '""')}"`).join(',')).join('\n');
       res.setHeader('Content-Type', 'text/csv');
       return res.send(csvString);
+    if (sort_by === 'net_earnings') {
+      tripsList.sort((a, b) => b.net_earnings - a.net_earnings);
+    } else if (sort_by === 'base_freight') {
+      tripsList.sort((a, b) => b.base_freight - a.base_freight);
     }
 
     res.json({
