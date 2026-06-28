@@ -84,10 +84,14 @@ export async function awardReputationPoints(driverWalletAddress, stars) {
     logger.warn(`[reputation] Invalid driver wallet address "${driverWalletAddress}" — skipping.`);
     return;
   }
-  const tx = await reputationContract.increaseReputation(driverWalletAddress, stars);
-  logger.info(`[reputation] increaseReputation tx submitted: ${tx.hash}`);
-  await tx.wait(1); // wait for 1 confirmation
-  logger.info(`[reputation] increaseReputation confirmed for driver ${driverWalletAddress} (+${stars} pts).`);
+  try {
+    const tx = await reputationContract.increaseReputation(driverWalletAddress, stars);
+    logger.info(`[reputation] increaseReputation tx submitted: ${tx.hash}`);
+    await tx.wait(1); // wait for 1 confirmation
+    logger.info(`[reputation] increaseReputation confirmed for driver ${driverWalletAddress} (+${stars} pts).`);
+  } catch (err) {
+    logger.error(`[reputation] Blockchain error in awardReputationPoints for ${driverWalletAddress}: ${err.message}`);
+  }
 }
 
 /**
