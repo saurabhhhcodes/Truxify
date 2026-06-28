@@ -36,7 +36,7 @@ class _TripsScreenState extends State<TripsScreen> {
   Map<String, List<Map<String, dynamic>>> _routePointsByTripId = {};
 
   bool _isLoadingTrips = true;
-  bool _isLoadingMoreTrips = false;
+
   String? _tripsError;
   String? _nextTripsCursor;
   bool _hasMoreTrips = true;
