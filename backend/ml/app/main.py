@@ -22,7 +22,10 @@ from .models.trust_scorer import trust_scorer
 from .models.deadhead_eliminator import find_return_loads
 from .models.mid_trip_reoptimiser import find_mid_trip_loads
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 async def verify_api_key(x_api_key: str = Header(None, alias="X-API-Key")):

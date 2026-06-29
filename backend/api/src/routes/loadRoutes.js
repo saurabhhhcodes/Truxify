@@ -48,7 +48,7 @@ router.get('/', authenticate, userLimiter, requireRole(['driver']), async (req, 
 
     // Handle vehicle_type filtering in JS to avoid database column errors.
     // Default mapped vehicle_type is 'Truck'. If they filter by something else, return empty.
-    if (req.query.vehicle_type && req.query.vehicle_type.toLowerCase() !== 'truck') {
+    if (req.query.vehicle_type && (typeof req.query.vehicle_type !== 'string' || req.query.vehicle_type.toLowerCase() !== 'truck')) {
       return res.json({
         page,
         limit,
@@ -65,7 +65,6 @@ router.get('/', authenticate, userLimiter, requireRole(['driver']), async (req, 
       .from('load_offers')
       .select('*', { count: 'exact' });
 
-    // Status filter - map 'open'/'available' to the DB's status 'available'
     let statusFilter = 'available';
     if (req.query.status) {
       if (typeof req.query.status !== 'string') {
