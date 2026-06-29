@@ -62,7 +62,7 @@ function checkPolygon() {
   return process.env.POLYGON_RPC_URL ? 'configured' : 'not_configured';
 }
 
-const CRITICAL_UNHEALTHY = new Set(['failed', 'not_configured']);
+const CRITICAL_UNHEALTHY = new Set(['failed']);
 
 // GET /api/health — full dependency check; returns 503 when a critical service fails
 router.get('/', async (req, res) => {
@@ -81,7 +81,7 @@ router.get('/', async (req, res) => {
   };
 
   const criticalFailed =
-    CRITICAL_UNHEALTHY.has(supabaseStatus) || CRITICAL_UNHEALTHY.has(mongoStatus);
+    CRITICAL_UNHEALTHY.has(supabaseStatus) || (mongoStatus === 'failed');
 
   const status = criticalFailed ? 'degraded' : 'ok';
   const httpStatus = criticalFailed ? 503 : 200;
