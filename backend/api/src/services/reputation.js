@@ -25,6 +25,7 @@ import logger from '../middleware/logger.js';
 // Minimal ABI — only the subset the backend needs to call.
 const REPUTATION_ABI = [
   'function increaseReputation(address driver, uint256 points) external',
+  'function decreaseReputation(address driver, uint256 points) external',
   'function getReputation(address driver) external view returns (uint256)',
 ];
 /** @type {ethers.Contract | null} */
