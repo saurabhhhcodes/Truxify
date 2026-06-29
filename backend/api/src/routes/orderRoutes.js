@@ -1433,6 +1433,8 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
           .eq('order_display_id', order.order_display_id)
           .eq('milestone', 'Order Placed');
 
+        await expireDeliveryOtps(order.order_display_id);
+
         return res.json({
           message: 'Order cancelled and escrow refunded successfully.',
           cancellation_fee: updatedOrder?.cancellation_fee ?? 0,
@@ -1486,6 +1488,8 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
     await supabase.from('order_timeline').update({ completed: true, milestone_time: new Date().toISOString() })
       .eq('order_display_id', order.order_display_id)
       .eq('milestone', 'Order Placed');
+
+    await expireDeliveryOtps(order.order_display_id);
 
     return res.json({ message: 'Order cancelled successfully.', cancellation_fee: cancellationFee, order: updatedOrder });
   } catch (err) {
