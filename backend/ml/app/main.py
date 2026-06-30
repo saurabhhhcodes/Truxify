@@ -59,6 +59,14 @@ app.add_middleware(
 )
 
 
+@app.on_event("startup")
+async def startup_event():
+    from .models.base import preload_all_models
+    logger.info("ML Engine starting, pre-loading models...")
+    await preload_all_models()
+    logger.info("ML Engine startup complete")
+
+
 # ---------------------------------------------------------------------------
 # Schemas — Demand Forecast
 # ---------------------------------------------------------------------------
