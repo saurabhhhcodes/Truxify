@@ -61,10 +61,10 @@ export async function authenticate(req, res, next) {
 
   try {
     let userProfile = null;
-    let decoded = null;
     let firebaseUid = null;
     let supabaseUserId = null;
 
+    let decoded;
     try {
       decoded = jwt.decode(token);
     } catch (err) {
@@ -92,8 +92,8 @@ export async function authenticate(req, res, next) {
           void invalidateCachedSupabaseProfile(supabaseUserId);
         } else if (cachedProfile.isActive === false) {
           return res.status(403).json({
-            error: 'User profile not found in database.',
-            hint: 'Register user in profiles table first.'
+            error: 'User profile is inactive.',
+            hint: 'Contact support to reactivate your account.'
           });
         } else {
           req.user = cachedProfile;
@@ -133,9 +133,9 @@ export async function authenticate(req, res, next) {
           try { await invalidateCachedProfile(firebaseUid); } catch (_) { logger.error('Cache invalidation failed', _); }
         } else {
           if (cachedProfile.isActive === false) {
-            return res.status(403).json({ 
-              error: 'User profile not found in database.', 
-              hint: 'Register user in profiles table first.' 
+            return res.status(403).json({
+              error: 'User profile is inactive.',
+              hint: 'Contact support to reactivate your account.'
             });
           }
           req.user = cachedProfile;
