@@ -258,3 +258,11 @@ export async function confirmEscrowRefund(txHash) {
   }
   return receipt;
 }
+
+export function bookingIdFromUuid(orderId) {
+  return getEscrowBookingId(orderId);
+}
+
+export async function releaseEscrowFunds(orderDisplayId) {
+  return escrowRelease(orderDisplayId);
+}
