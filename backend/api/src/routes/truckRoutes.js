@@ -105,11 +105,19 @@ router.get('/', authenticate, requireRole(['driver']), userLimiter, async (req, 
     if (max_capacity && (!Number.isFinite(parsedMax) || parsedMax < 0)) {
       return res.status(400).json({ error: 'max_capacity must be a non-negative number' });
     }
-    if (min_capacity) {
-      query = query.gte('max_capacity_tons', parsedMin);
+    if (min_capacity !== undefined) {
+      const minCapNum = Number(min_capacity);
+      if (Number.isNaN(minCapNum) || minCapNum < 0) {
+        return res.status(400).json({ error: 'min_capacity must be a positive number' });
+      }
+      query = query.gte('max_capacity_tons', minCapNum);
     }
-    if (max_capacity) {
-      query = query.lte('max_capacity_tons', parsedMax);
+    if (max_capacity !== undefined) {
+      const maxCapNum = Number(max_capacity);
+      if (Number.isNaN(maxCapNum) || maxCapNum < 0) {
+        return res.status(400).json({ error: 'max_capacity must be a positive number' });
+      }
+      query = query.lte('max_capacity_tons', maxCapNum);
     }
 
     const { data: trucks, error } = await query.order('created_at', { ascending: false });
