@@ -400,6 +400,10 @@ router.put('/:tripDisplayId/stops/:stopId/complete', authenticate, userLimiter, 
       is_current: false,
     }).eq('id', stopId).eq('trip_display_id', tripDisplayId).select().maybeSingle();
 
+    if (updatedStop.error) {
+      logger.error('[tripRoutes] Failed to update stop:', updatedStop.error.message);
+      return res.status(500).json({ error: 'Database error while updating stop.' });
+    }
     if (!updatedStop.data) return res.status(404).json({ error: 'Stop not found or does not belong to this trip.' });
 
     const nextStops = await supabase.from('trip_stops').select()
