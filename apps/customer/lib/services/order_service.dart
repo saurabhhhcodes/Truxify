@@ -275,7 +275,7 @@ class OrderService {
   Future<String?> fetchTruckNumber(String truckId) async {
     try {
       final body = await _apiClient.get(
-        '/api/trucks/$truckId/number',
+        '/api/trucks/${_encodePathSegment(truckId)}/number',
       ) as Map<String, dynamic>?;
       final numberPlate = body?['number_plate']?.toString().trim();
       return (numberPlate != null && numberPlate.isNotEmpty) ? numberPlate : null;

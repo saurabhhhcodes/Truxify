@@ -76,15 +76,15 @@ void main() {
     expect(order404, isNull);
   });
 
-  test('fetchDriverName encodes driver id path segment', () async {
-    when(() => apiClient.get('/api/profile/driver%2F123%3Fname%3DA/name'))
-        .thenAnswer((_) async => {'full_name': 'Driver A'});
+  test('fetchTruckNumber encodes truck id path segment', () async {
+    when(() => apiClient.get('/api/trucks/truck%2F123%23plate/number'))
+        .thenAnswer((_) async => {'number_plate': 'MH-01-AB-1234'});
 
-    final name = await orderService.fetchDriverName('driver/123?name=A');
+    final number = await orderService.fetchTruckNumber('truck/123#plate');
 
-    expect(name, equals('Driver A'));
+    expect(number, equals('MH-01-AB-1234'));
     verify(
-      () => apiClient.get('/api/profile/driver%2F123%3Fname%3DA/name'),
+      () => apiClient.get('/api/trucks/truck%2F123%23plate/number'),
     ).called(1);
   });
 
