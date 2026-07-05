@@ -88,6 +88,9 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
 
     constructor() Ownable(msg.sender) {}
 
+    receive() external payable {}
+    fallback() external payable {}
+
     // ─── External Functions ──────────────────────────────────────────────────
 
     /**
