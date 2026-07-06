@@ -91,7 +91,7 @@ class MarketplaceRepository {
     return DriverBid.fromJson(Map<String, dynamic>.from(decoded['bid'] as Map));
   }
 
-  Future<List<DriverBid>> fetchDriverBids({required String driverId}) async {
+  Future<List<DriverBid>> fetchDriverBids() async {
     final uri = Uri.parse('$_apiBaseUrl/api/driver/bids');
     final response = await _httpClient.get(uri, headers: await _authHeaders());
 
