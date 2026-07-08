@@ -52,6 +52,8 @@ function sanitizeTelemetryData(data) {
 let mongoDbOverride = null;
 const getMongoDb = () => mongoDbOverride || mongoDb;
 
+let _orderRepository = null;
+
 let telemetryDropCounter = 0;
 const RECOVERY_FILE_PATH = process.env.RECOVERY_FILE_PATH || path.join(os.tmpdir(), 'truxify-telemetry-recovery.jsonl');
 
@@ -214,7 +216,8 @@ export function rejectWebSocketUpgrade(socket) {
 /**
  * Initialize WebSockets Server and bind event handlers
  */
-export function initWebSocketServer(server) {
+export function initWebSocketServer(server, orderRepository) {
+  _orderRepository = orderRepository;
   const wss = new WebSocketServer({ noServer: true });
   wsServer = wss;
 
@@ -556,17 +559,10 @@ export async function handleLocationPing(ws, data, req) {
   let orderUUID = data.orderId || data.order_id || null;
   let orderDisplayId = data.order_display_id || null;
 
-  if (supabase && (orderUUID || orderDisplayId)) {
+  if (_orderRepository && (orderUUID || orderDisplayId)) {
     try {
-      let query = supabase.from('orders').select('id, order_display_id, driver_id');
-      if (orderUUID && orderUUID.includes('-')) {
-        query = query.eq('id', orderUUID);
-      } else if (orderDisplayId) {
-        query = query.eq('order_display_id', orderDisplayId);
-      } else {
-        query = query.eq('order_display_id', orderUUID);
-      }
-      const { data: order } = await query.maybeSingle();
+      const idToLookup = orderUUID || orderDisplayId;
+      const { data: order } = await _orderRepository.findOrderByAnyId(idToLookup, 'id, order_display_id, driver_id');
       if (order) {
         // Verify the authenticated driver is assigned to this order
         if (order.driver_id !== driver_id) {
@@ -975,15 +971,11 @@ async function canSubscribe(ws, { order_display_id, driver_id }) {
     return driver_id === userId || driver_id === ws.driverId;
   }
 
-  if (!order_display_id || !supabase) {
+  if (!order_display_id || !_orderRepository) {
     return false;
   }
 
-  const { data: order, error } = await supabase
-    .from('orders')
-    .select('customer_id, driver_id')
-    .eq('order_display_id', order_display_id)
-    .maybeSingle();
+  const { data: order, error } = await _orderRepository.findOrderByDisplayId(order_display_id, 'customer_id, driver_id');
 
   if (error || !order) {
     return false;
@@ -1113,6 +1105,9 @@ async function restoreSubscriptions(ws) {
 export const __testing = {
   resetTrackingSubscriptions() {
     trackingSubscriptions.clear();
+  },
+  setOrderRepository(repo) {
+    _orderRepository = repo;
   },
   async restoreSubscriptions(ws) {
     await restoreSubscriptions(ws);

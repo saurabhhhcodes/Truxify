@@ -9,7 +9,10 @@ import tripRoutes from './routes/tripRoutes.js'
 import deviceRoutes from './routes/deviceRoutes.js'
 import documentRoutes from './routes/documentRoutes.js'
 
-import { closeDbConnections, waitForMongoDb, validateConfig } from './config/db.js'
+import { closeDbConnections, waitForMongoDb, validateConfig, supabase } from './config/db.js'
+import { OrderRepository } from './repositories/orderRepository.js'
+
+const orderRepository = new OrderRepository(supabase)
 import { closeWebSocketServer, initWebSocketServer } from './sockets/tracker.js'
 import { initLocationServer, closeLocationServer } from './sockets/locationServer.js'
 import { startEscrowReleaseReconciliation, stopEscrowReleaseReconciliation } from './services/escrowReleaseReconciliation.js'
@@ -202,7 +205,7 @@ app.use((err, req, res, next) => {
 // WEBSOCKET SERVER INIT (wait for MongoDB before accepting WebSocket connections)
 // ============================================================================
 await waitForMongoDb()
-initWebSocketServer(server)
+initWebSocketServer(server, orderRepository)
 initLocationServer(server)
 
 // ============================================================================
@@ -212,7 +215,7 @@ const PORT = process.env.PORT || 5000
 
 server.listen(PORT, () => {
   logger.info(`Truxify API listening on port ${PORT}`)
-  startEscrowRefundReconciliation()
+  startEscrowRefundReconciliation(orderRepository)
   startEscrowReleaseReconciliation()
   startReputationReconciliation()
 })

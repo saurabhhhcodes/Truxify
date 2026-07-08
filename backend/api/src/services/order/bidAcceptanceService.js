@@ -15,16 +15,23 @@ export class BidAcceptanceService {
   }
 
   async acceptBid({ orderId, bidId, customerId }) {
+    const orderResult = await this.orderRepository.findOrderById(orderId, 'order_display_id, customer_id');
+    const order = orderResult.data;
     const { data: order } = await this.orderRepository.findOrderById(orderId, 'order_display_id, customer_id');
     if (!order || order.customer_id !== customerId) {
       throw new DomainError(403, { error: 'Access Denied: You do not own this order.' });
     }
 
+    const bidResult = await this.orderRepository.findBidById(bidId);
+    const bid = bidResult.data;
     const { data: bid } = await this.orderRepository.findBidById(bidId);
     if (!bid || bid.status !== 'pending') {
       throw new DomainError(404, { error: 'Bid is not active or not found.' });
     }
 
+    const loadOfferResult = await this.orderRepository.findLoadOfferByOrderDisplayId(order.order_display_id);
+    const loadOffer = loadOfferResult.data;
+    const loadOfferErr = loadOfferResult.error;
     const { data: loadOffer, error: loadOfferErr } = await this.orderRepository.findLoadOfferByOrderDisplayId(order.order_display_id);
     if (loadOfferErr) {
       throw new DomainError(500, { error: 'Failed to verify bid ownership.', details: loadOfferErr.message });
@@ -38,6 +45,7 @@ export class BidAcceptanceService {
 
     const [driverDetailsResult, customerProfileResult] = await Promise.all([
       this.orderRepository.findDriverDetail(bid.driver_id),
+      this.orderRepository.findCustomerWallet(customerId),
       this.orderRepository.findProfile(customerId, 'polygon_wallet_address'),
     ]);
 
@@ -51,18 +59,23 @@ export class BidAcceptanceService {
       });
     }
 
+    const [profileResult, detailsResult] = await Promise.all([
     const [{ data: profile }, { data: details }] = await Promise.all([
       this.orderRepository.findProfile(bid.driver_id, 'full_name'),
       this.orderRepository.findDriverDetailWithRating(bid.driver_id),
     ]);
+    const profile = profileResult.data;
+    const details = detailsResult.data;
 
     let truckInfo = null;
     if (details && details.truck_id) {
+      const truckResult = await this.orderRepository.findTruckWithDetails(details.truck_id);
+      const truckErr = truckResult.error;
       const { data, error: truckErr } = await this.orderRepository.findTruckWithDetails(details.truck_id);
       if (truckErr) {
         this.logger?.error?.('Truck lookup error during bid accept:', truckErr.message);
       }
-      truckInfo = data;
+      truckInfo = truckResult.data;
     }
 
     // Build the escrow deposit transaction
@@ -85,14 +98,12 @@ export class BidAcceptanceService {
     }
 
     // Update order with escrow booking info
-    const { error: escrowUpdateErr } = await this.supabase.from('orders').update({
-      escrow_booking_id: bookingId,
-      escrow_status: 'funding',
-    }).eq('id', orderId);
+    const { error: escrowUpdateErr } = await this.orderRepository.updateEscrowBooking(orderId, bookingId, 'funding');
     if (escrowUpdateErr) {
       this.logger?.warn?.('[escrow] Failed to update escrow booking reference:', escrowUpdateErr.message);
     }
 
+    // Execute RPC to accept bid
     const { error: rpcErr } = await this.orderRepository.executeRpc('accept_bid_tx', {
       p_bid_id: bidId,
       p_order_id: orderId,
@@ -115,6 +126,7 @@ export class BidAcceptanceService {
           this.logger?.error?.(`[escrow] CRITICAL: Escrow refund also failed for order ${order.order_display_id}:`, refundErr.message);
         }
       }
+      // Revert escrow status back to pending since RPC failed
       const { error: revertErr } = await this.orderRepository.revertEscrowStatus(orderId);
       if (revertErr) {
         this.logger?.error?.('[escrow] Failed to revert escrow status after RPC failure:', revertErr.message);

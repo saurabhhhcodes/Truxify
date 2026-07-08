@@ -39,6 +39,8 @@ vi.mock('../../src/config/db.js', () => ({
   },
 }));
 
+import { OrderRepository } from '../../src/repositories/orderRepository.js';
+
 const {
   closeWebSocketServer,
   handleLocationPing,
@@ -49,10 +51,13 @@ const {
 } = await import('../../src/sockets/tracker.js');
 
 describe('tracker WebSocket telemetry authorization', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     dbMock.store.orders = [];
     dbMock.calls = [];
     __testing.resetTrackingSubscriptions();
+    const { supabase } = await import('../../src/config/db.js');
+    const orderRepo = new OrderRepository(supabase);
+    __testing.setOrderRepository(orderRepo);
     vi.clearAllMocks();
   });
 
