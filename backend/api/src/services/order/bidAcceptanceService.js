@@ -70,15 +70,22 @@ export class BidAcceptanceService {
     }
 
     // Build the escrow deposit transaction
-    let depositTx = null;
-    let bookingId = null;
+    let depositTx;
+    let bookingId;
     const amountWei = ethers.parseEther((bid.bid_amount / 100).toFixed(2).toString());
-    try {
-      const buildResult = await this.buildDepositTxFn(order.order_display_id, customerWallet, driverWallet, amountWei);
-      depositTx = buildResult;
-      bookingId = buildResult?.bookingId || `escrow:${order.order_display_id}`;
-    } catch (buildErr) {
-      throw buildErr; // Let it bubble up as a generic error to return 500
+    const buildResult = await this.buildDepositTxFn(order.order_display_id, customerWallet, driverWallet, amountWei);
+    depositTx = buildResult;
+    bookingId = buildResult?.bookingId || `escrow:${order.order_display_id}`;
+
+    // Guard against silent escrow disable: if buildDepositTx returned
+    // null txData (contract not initialised), reject immediately.
+    if (!buildResult?.txData) {
+      this.logger?.error?.('[escrow] Escrow deposit tx could not be built — escrow contract is not reachable or misconfigured.');
+      throw new DomainError(502, {
+        error: 'Escrow is not configured. Escrow deposit transaction could not be built.',
+        details: 'The escrow contract is unreachable or the blockchain environment variables are not set.',
+        recovery: 'This order cannot proceed with escrow protection. Please contact support.',
+      });
     }
 
     // Update order with escrow booking info
