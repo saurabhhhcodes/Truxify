@@ -19,9 +19,11 @@ export function requireIdempotency(ttlSeconds = 3600) {
       return next();
     }
 
-    // Identity: authenticated user ID or fallback to anonymous
+    // Identity: authenticated user ID or fallback to anonymous.
+    // Scope the key by method + originalUrl so two different endpoints (or
+    // verbs) sharing a user + key cannot collide.
     const identity = req.user?.id || 'anonymous';
-    const cacheKey = `idempotency:${identity}:${idempotencyKey}`;
+    const cacheKey = `idempotency:${identity}:${req.method}:${req.originalUrl}:${idempotencyKey}`;
 
     try {
       const cachedResponse = await redisClient.get(cacheKey);
@@ -34,9 +36,10 @@ export function requireIdempotency(ttlSeconds = 3600) {
       // If not, we intercept the res.json to cache the response before sending it
       const originalJson = res.json;
       res.json = function (body) {
-        // Only cache successful or non-server-error responses (e.g. 200, 400, 409)
-        // If it's a 500, we don't want to cache the error so the client can retry.
-        if (res.statusCode < 500) {
+        // Only cache successful (2xx) responses. Caching failures (e.g. 400,
+        // 409) would block legitimate client retries with the same key for the
+        // whole TTL, and 5xx is never cached so the client can retry.
+        if (res.statusCode >= 200 && res.statusCode < 300) {
           const cacheData = JSON.stringify({
             statusCode: res.statusCode,
             body: body
