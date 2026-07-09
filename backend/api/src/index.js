@@ -16,6 +16,7 @@ const orderRepository = new OrderRepository(supabase)
 import { closeWebSocketServer, initWebSocketServer } from './sockets/tracker.js'
 import { initLocationServer, closeLocationServer } from './sockets/locationServer.js'
 import { startEscrowReleaseReconciliation, stopEscrowReleaseReconciliation } from './services/escrowReleaseReconciliation.js'
+import { validateEscrowSetup } from './services/escrow.js'
 
 // Load REST routes
 import orderRoutes from './routes/orderRoutes.js'
@@ -68,12 +69,26 @@ if (process.env.NODE_ENV === 'production' && !process.env.ML_API_KEY) {
   process.exit(1)
 }
 if (process.env.NODE_ENV === 'production' && (!process.env.POLYGON_RPC_URL || !process.env.ESCROW_CONTRACT_ADDRESS || !process.env.RELAYER_WALLET_PRIVATE_KEY)) {
-  logger.fatal('Escrow environment variables (POLYGON_RPC_URL, ESCROW_CONTRACT_ADDRESS, RELAYER_WALLET_PRIVATE_KEY) are not set. These are required in production for on-chain escrow protection. Set all three and restart.');
-  process.exit(1);
+  logger.fatal('Escrow environment variables (POLYGON_RPC_URL, ESCROW_CONTRACT_ADDRESS, RELAYER_WALLET_PRIVATE_KEY) are not set. These are required in production for on-chain escrow protection. Set all three and restart.')
+  process.exit(1)
 }
 if (!process.env.DRIVER_LOGIN_OTP) {
   logger.warn('DRIVER_LOGIN_OTP is not set. Driver OTP login will be disabled until it is configured in production.')
 }
+// Validate escrow contract deployment — log warning if validation fails,
+// but don't crash (non-escrow functionality should still work).
+validateEscrowSetup().then((valid) => {
+  if (valid) {
+    logger.info('✅ Escrow contract deployment validated.')
+  } else {
+    logger.warn(
+      '⚠️  Escrow contract validation failed. Escrow operations will return ' +
+      '{ txData: null } and orders will proceed without on-chain protection. ' +
+      'Check ESCROW_CONTRACT_ADDRESS and the deployed contract.'
+    )
+  }
+})
+
 const app = express()
 const server = http.createServer(app)
 
@@ -169,18 +184,17 @@ app.use('/api/v1/trips', tripRoutes)
 // ============================================================================
 // REST API ROUTING
 // ============================================================================
-
-  app.use('/api/orders', orderRoutes)
-  app.use('/api/driver', driverRoutes)
-  app.use('/api/loads', loadRoutes)
-  app.use('/api/support', supportRoutes)
-  app.use('/api/profile', profileRoutes)
-  app.use('/api/devices', deviceRoutes)
-  app.use('/api/driver/documents', documentRoutes)
-  app.use('/api/trucks', truckRoutes)
-  app.use('/api/v1', lookupRoutes)
-  app.use('/api/auth', authLimiter, authRoutes)
-  app.use('/api/v1/admin', adminRoutes)
+app.use('/api/orders', orderRoutes)
+app.use('/api/driver', driverRoutes)
+app.use('/api/loads', loadRoutes)
+app.use('/api/support', supportRoutes)
+app.use('/api/profile', profileRoutes)
+app.use('/api/devices', deviceRoutes)
+app.use('/api/driver/documents', documentRoutes)
+app.use('/api/trucks', truckRoutes)
+app.use('/api/v1', lookupRoutes)
+app.use('/api/auth', authLimiter, authRoutes)
+app.use('/api/v1/admin', adminRoutes)
 
 // Setup Swagger Documentation
 setupSwagger(app)
