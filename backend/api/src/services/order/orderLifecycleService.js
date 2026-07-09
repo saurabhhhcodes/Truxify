@@ -343,6 +343,7 @@ export class OrderLifecycleService {
       'Arrived at Pickup': 'at_pickup',
       'Goods Loaded': 'in_transit',
       'In Transit': 'in_transit',
+      'Arriving': 'arriving',
       'Arrived at Drop-off': 'at_dropoff',
       'Goods Unloaded': 'at_dropoff',
     };
