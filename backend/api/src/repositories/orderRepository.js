@@ -1,4 +1,5 @@
 import { executeWithRetry, isRetryable } from '../core/retry.js';
+import { buildPagination } from '../utils/pagination.js';
 
 export class OrderRepository {
   constructor(supabase) {
@@ -66,13 +67,20 @@ export class OrderRepository {
     return this.findOrderByDisplayId(id, columns);
   }
 
-  async findOrdersByCustomer(customerId, columns, statuses, orderColumn, ascending) {
-    return this._retryableQuery(() => this.supabase
-      .from('orders')
-      .select(columns)
-      .eq('customer_id', customerId)
-      .in('status', statuses)
-      .order(orderColumn || 'pickup_date', { ascending: ascending ?? false }), 'findOrdersByCustomer');
+  async findOrdersByCustomer(customerId, columns, statuses, orderColumn, ascending, pagination) {
+    return this._retryableQuery(() => {
+      let query = this.supabase
+        .from('orders')
+        .select(columns)
+        .eq('customer_id', customerId)
+        .in('status', statuses)
+        .order(orderColumn || 'pickup_date', { ascending: ascending ?? false });
+      if (pagination) {
+        const { from, to } = buildPagination(pagination);
+        query = query.range(from, to);
+      }
+      return query;
+    }, 'findOrdersByCustomer');
   }
 
   async findOrdersWithCount(customerId, columns, pagination) {
@@ -240,15 +248,20 @@ export class OrderRepository {
       .maybeSingle(), 'findLoadOfferByOrderDisplayId');
   }
 
-  async findLoadOffers(filters, options) {
+  async findLoadOffers(filters, options = {}) {
     return this._retryableQuery(() => {
-      let query = this.supabase.from('load_offers').select('*');
+      let query = this.supabase.from('load_offers').select('*', options.count ? { count: 'exact' } : undefined);
       if (filters) {
         for (const [col, val] of Object.entries(filters)) {
           query = query.eq(col, val);
         }
       }
-      return query.order('created_at', { ascending: false });
+      query = query.order('created_at', { ascending: false });
+      if (options.pagination) {
+        const { from, to } = buildPagination(options.pagination);
+        query = query.range(from, to);
+      }
+      return query;
     }, 'findLoadOffers');
   }
 
@@ -286,17 +299,21 @@ export class OrderRepository {
       .maybeSingle(), 'findBidById');
   }
 
-  async findBidsByLoad(loadId, status, options) {
+  async findBidsByLoad(loadId, status, options = {}) {
     return this._retryableQuery(() => {
       let query = this.supabase
         .from('load_bids')
-        .select('*')
+        .select('*', options.count ? { count: 'exact' } : undefined)
         .eq('load_id', loadId);
       if (status) {
         query = query.eq('status', status);
       }
-      if (options?.orderBy) {
+      if (options.orderBy) {
         query = query.order(options.orderBy, { ascending: options.ascending ?? true });
+      }
+      if (options.pagination) {
+        const { from, to } = buildPagination(options.pagination);
+        query = query.range(from, to);
       }
       return query;
     }, 'findBidsByLoad');
