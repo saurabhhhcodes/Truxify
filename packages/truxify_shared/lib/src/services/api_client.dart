@@ -119,13 +119,22 @@ class ApiClient {
 
   Future<String?> _refreshedToken() async {
     try {
-      // Prefer Firebase token refresh.
       final firebaseUser = FirebaseAuth.instance.currentUser;
       if (firebaseUser != null) {
         final token = await firebaseUser.getIdToken(true);
         _cachedFirebaseToken = token;
         return token;
       }
+    } catch (e) {
+      if (kDebugMode) {
+        developer.log(
+          '[ApiClient] Firebase token refresh failed: $e',
+          name: 'ApiClient',
+        );
+      }
+    }
+
+    try {
       // Fall back to Supabase session refresh.
       final res = await _supabase.auth.refreshSession();
       return res.session?.accessToken;
