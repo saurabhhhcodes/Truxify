@@ -12,6 +12,9 @@ logger = logging.getLogger(__name__)
 
 MODEL_NAME = "demand_forecast"
 
+# Module-level cache to avoid reloading from disk on every call
+_model_cache = None
+
 # NOTE: This module currently trains on synthetic (randomly generated) data
 # as a placeholder. Replace generate_synthetic_demand_data() with a real
 # data pipeline that loads historical trip/demand data from PostgreSQL or
