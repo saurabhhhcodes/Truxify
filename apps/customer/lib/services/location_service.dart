@@ -34,10 +34,6 @@ class LocationService {
     if (_searchCache.containsKey(cacheKey)) {
       return _searchCache[cacheKey]!;
     }
-    final trimmed = query.trim();
-    if (trimmed.length < 3) {
-      return const <LocationSuggestion>[];
-    }
 
     final uri = Uri.https(
       _host,
@@ -63,7 +59,7 @@ class LocationService {
 
     final decoded = jsonDecode(response.body);
     if (decoded is! List) return const <LocationSuggestion>[];
-    return decoded
+    final results = decoded
         .map((item) {
           if (item is! Map<String, dynamic>) return null;
           final json = item;
@@ -82,7 +78,7 @@ class LocationService {
         .whereType<LocationSuggestion>()
         .toList();
 
-    _cacheSearch(trimmed, results);
+    _cacheSearch(cacheKey, results);
     return results;
   }
 

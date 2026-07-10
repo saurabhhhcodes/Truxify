@@ -60,20 +60,15 @@ class FcmService {
       debugPrint('[FCM] No authenticated user, skipping token unregister.');
       return;
     }
-    final accessToken = await firebaseUser.getIdToken();
 
-    final response = await http.post(
-      Uri.parse('$_apiBaseUrl/api/devices/unregister'),
-      headers: <String, String>{
-        'Content-Type': 'application/json',
-        if (accessToken != null && accessToken.isNotEmpty) 'Authorization': 'Bearer $accessToken',
-      },
-      body: jsonEncode(<String, dynamic>{
-        'fcmToken': token,
-      }),
-    );
-
-    if (response.statusCode >= 200 && response.statusCode < 300) {
+    final apiClient = ApiClient();
+    try {
+      await apiClient.post(
+        '/api/devices/unregister',
+        body: <String, dynamic>{
+          'fcmToken': token,
+        },
+      );
       debugPrint('[FCM] Device token unregistered successfully.');
     } catch (e) {
       debugPrint('[FCM] Failed to unregister device token: $e');
