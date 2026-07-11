@@ -23,7 +23,7 @@ vi.mock('../../src/middleware/logger.js', () => ({
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
 
-import { predictDemand, predictPrice, mlBreaker } from '../../src/services/ml.js';
+import { predictDemand, predictPrice, mlBreaker, __testing } from '../../src/services/ml.js';
 
 describe('ml service — predictDemand', () => {
   beforeEach(() => {
@@ -33,6 +33,7 @@ describe('ml service — predictDemand', () => {
     if (mlBreaker) {
       mlBreaker.disable();
     }
+    __testing.demandCache.clear();
   });
 
   afterEach(() => {
@@ -137,6 +138,7 @@ describe('ml service — predictPrice', () => {
     if (mlBreaker) {
       mlBreaker.disable();
     }
+    __testing.priceCache.clear();
   });
 
   afterEach(() => {
