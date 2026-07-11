@@ -48,6 +48,12 @@ import shardManager from './services/sharding/ShardManager.js'
 import webrtcRoutes from './routes/webrtcRoutes.js'
 import { initWebRTCSignaling, closeWebRTCSignaling } from './sockets/webrtc.js'
 
+// ============================================================================
+// 🆕 FRAUD DETECTION ROUTES
+// ============================================================================
+import fraudRoutes from './routes/fraudRoutes.js'
+import { fraudDetectionMiddleware, networkAnalysisMiddleware } from './middleware/fraudMiddleware.js'
+
 import logger from './middleware/logger.js'
 import { setupSwagger } from './config/swagger.js'
 import { correlationIdMiddleware } from './middleware/correlationId.js'
@@ -118,6 +124,16 @@ if (!process.env.SHARD_NORTH_HOST || !process.env.SHARD_SOUTH_HOST ||
 // ============================================================================
 if (!process.env.WEBRTC_ENABLED) {
   logger.info('WebRTC signaling server will start by default')
+}
+
+// ============================================================================
+// 🆕 FRAUD DETECTION VALIDATION
+// ============================================================================
+if (!process.env.FRAUD_THRESHOLD) {
+  logger.warn('FRAUD_THRESHOLD not set, using default: 0.7')
+}
+if (!process.env.BEHAVIORAL_ANALYTICS_ENABLED) {
+  logger.info('Behavioral analytics enabled by default')
 }
 
 // Validate escrow contract deployment — log warning if validation fails,
@@ -219,6 +235,12 @@ app.use(requestLogger)
 app.use(requireJsonContent)
 
 // ============================================================================
+// 🆕 FRAUD DETECTION MIDDLEWARE (Global)
+// ============================================================================
+app.use(fraudDetectionMiddleware)
+app.use(networkAnalysisMiddleware)
+
+// ============================================================================
 // RATE LIMITING
 // ============================================================================
 app.use('/api/health', healthLimiter)
@@ -307,6 +329,23 @@ app.get('/api/webrtc/status', (req, res) => {
   })
 })
 
+// ============================================================================
+// 🆕 FRAUD DETECTION ROUTES
+// ============================================================================
+app.use('/api', fraudRoutes)
+
+// 🆕 Fraud Health Check Endpoint
+app.get('/api/fraud/health', (req, res) => {
+  res.json({
+    status: 'healthy',
+    version: '1.0.0',
+    threshold: process.env.FRAUD_THRESHOLD || 0.7,
+    behavioralAnalytics: process.env.BEHAVIORAL_ANALYTICS_ENABLED !== 'false',
+    networkAnalysis: process.env.NETWORK_ANALYSIS_ENABLED !== 'false',
+    timestamp: new Date().toISOString()
+  })
+})
+
 // Setup Swagger Documentation
 setupSwagger(app)
 
@@ -363,6 +402,7 @@ server.listen(PORT, () => {
   logger.info(`🆕 Verification endpoints available at /api/verify and /api/oracle`)
   logger.info(`🆕 Geographic Sharding enabled with 4 shards (North, South, East, West)`)
   logger.info(`🆕 WebRTC P2P Mesh Network available at ws://localhost:${PORT}/webrtc`)
+  logger.info(`🆕 Fraud Detection enabled with threshold: ${process.env.FRAUD_THRESHOLD || 0.7}`)
   startEscrowRefundReconciliation(orderRepository)
   startEscrowReleaseReconciliation()
   startReputationReconciliation()
