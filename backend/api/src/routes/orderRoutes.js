@@ -221,8 +221,6 @@ router.post('/', authenticate, userLimiter, requireRole(['customer']), requireId
   try {
     for (let attempt = 0; attempt < MAX_ID_RETRIES; attempt++) {
       orderDisplayId = generateOrderDisplayId();
-      const result = await orderRepository
-        .createOrder({
       const result = await supabase
         .from('orders')
         .insert({
@@ -240,7 +238,6 @@ router.post('/', authenticate, userLimiter, requireRole(['customer']), requireId
           total_amount: pricing.totalAmount,
           estimated_price: estimatedPrice,
           payment_method_id, upi_id
-        });
         })
         .select('id, order_display_id, status, created_at')
         .single();
