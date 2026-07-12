@@ -54,6 +54,11 @@ import { initWebRTCSignaling, closeWebRTCSignaling } from './sockets/webrtc.js'
 import fraudRoutes from './routes/fraudRoutes.js'
 import { fraudDetectionMiddleware, networkAnalysisMiddleware } from './middleware/fraudMiddleware.js'
 
+// ============================================================================
+// 🆕 ZK-PROOFS FOR DRIVER KYC
+// ============================================================================
+import zkpRoutes from './routes/zkp.routes.js'
+
 import logger from './middleware/logger.js'
 import { setupSwagger } from './config/swagger.js'
 import { correlationIdMiddleware } from './middleware/correlationId.js'
@@ -134,6 +139,16 @@ if (!process.env.FRAUD_THRESHOLD) {
 }
 if (!process.env.BEHAVIORAL_ANALYTICS_ENABLED) {
   logger.info('Behavioral analytics enabled by default')
+}
+
+// ============================================================================
+// 🆕 ZK-PROOFS VALIDATION
+// ============================================================================
+if (!process.env.KYC_VERIFIER_CONTRACT) {
+  logger.warn('⚠️ KYC_VERIFIER_CONTRACT not set. ZK proof verification will not work.')
+}
+if (!process.env.PRIVATE_KEY) {
+  logger.warn('⚠️ PRIVATE_KEY not set. Cannot sign ZK proof transactions.')
 }
 
 // Validate escrow contract deployment — log warning if validation fails,
@@ -346,6 +361,22 @@ app.get('/api/fraud/health', (req, res) => {
   })
 })
 
+// ============================================================================
+// 🆕 ZK-PROOFS FOR DRIVER KYC ROUTES
+// ============================================================================
+app.use('/api', zkpRoutes)
+
+// 🆕 ZK-Proof Health Check Endpoint
+app.get('/api/zkp/health', (req, res) => {
+  res.json({
+    status: 'healthy',
+    version: '1.0.0',
+    service: 'zk-snarks',
+    verifierContract: process.env.KYC_VERIFIER_CONTRACT || 'not-set',
+    timestamp: new Date().toISOString()
+  })
+})
+
 // Setup Swagger Documentation
 setupSwagger(app)
 
@@ -403,6 +434,7 @@ server.listen(PORT, () => {
   logger.info(`🆕 Geographic Sharding enabled with 4 shards (North, South, East, West)`)
   logger.info(`🆕 WebRTC P2P Mesh Network available at ws://localhost:${PORT}/webrtc`)
   logger.info(`🆕 Fraud Detection enabled with threshold: ${process.env.FRAUD_THRESHOLD || 0.7}`)
+  logger.info(`🆕 ZK-Proof KYC Verification enabled with contract: ${process.env.KYC_VERIFIER_CONTRACT || 'not-deployed'}`)
   startEscrowRefundReconciliation(orderRepository)
   startEscrowReleaseReconciliation()
   startReputationReconciliation()
