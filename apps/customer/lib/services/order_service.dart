@@ -206,7 +206,10 @@ class OrderService {
       final body = await _apiClient.get(
         path,
       );
-      final List<dynamic> listBody = body is List<dynamic> ? body : <dynamic>[];
+      if (body is! List) {
+        throw StateError('Unexpected truck search response type');
+      }
+      final listBody = body;
       return listBody.cast<Map<String, dynamic>>();
     } on ApiException catch (e) {
       throw StateError(e.message);

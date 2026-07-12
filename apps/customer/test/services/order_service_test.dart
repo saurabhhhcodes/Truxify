@@ -120,6 +120,28 @@ void main() {
     ).called(1);
   });
 
+  test('searchTrucks rejects malformed response payloads', () async {
+    when(() => apiClient.get(any(that: startsWith('/api/trucks/search'))))
+        .thenAnswer((_) async => {'trucks': []});
+
+    await expectLater(
+      () => orderService.searchTrucks(
+        pickupLat: 12.3,
+        pickupLng: 45.6,
+        dropLat: 78.9,
+        dropLng: 12.3,
+        weightTonnes: 5.5,
+      ),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains('Failed to search trucks'),
+        ),
+      ),
+    );
+  });
+
   group('estimatePriceRange', () {
     test('returns correct min and max when prices are integers', () async {
       when(() => apiClient.get(
