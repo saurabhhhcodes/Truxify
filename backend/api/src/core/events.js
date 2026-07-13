@@ -1,4 +1,5 @@
 import EventEmitter from 'events';
+import logger from '../middleware/logger.js';
 
 class EventBus extends EventEmitter {
   constructor() {
@@ -16,14 +17,14 @@ class EventBus extends EventEmitter {
     const listeners = this.rawListeners(event);
     for (const listener of listeners) {
       try {
-        const result = listener(...args);
+        const result = listener.apply(this, args);
         if (result && typeof result.catch === 'function') {
           result.catch(err =>
-            console.error(`[EventBus] Unhandled async listener error for "${event}":`, err)
+            logger.error(`[EventBus] Unhandled async listener error for "${event}":`, err)
           );
         }
       } catch (err) {
-        console.error(`[EventBus] Sync listener error for "${event}":`, err);
+        logger.error(`[EventBus] Sync listener error for "${event}":`, err);
       }
     }
     return listeners.length > 0;
