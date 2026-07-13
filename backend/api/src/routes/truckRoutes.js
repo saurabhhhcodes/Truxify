@@ -1,6 +1,7 @@
 import express from 'express';
-import { supabase } from '../config/db.js';
-import { authenticate, requireRole } from '../middleware/auth.js';
+import { supabase, mongoDb } from '../config/db.js';
+import { authenticate } from '../middleware/auth.js';
+import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import { validateParams, validateBody } from '../middleware/validate.js';
 import { uuidParamSchema, registerTruckSchema } from '../validation/requestSchemas.js';
@@ -8,6 +9,25 @@ import { getRouteEstimate } from '../services/osrm.js';
 import { computeOrderPricing } from '../lib/pricing.js';
 import { predictPrice } from '../services/ml.js';
 import logger from '../middleware/logger.js';
+
+function sanitizeNumberPlate(plate) {
+  if (!plate || typeof plate !== 'string') return '';
+  return plate.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+function sanitizeTruckName(name) {
+  if (!name || typeof name !== 'string') return '';
+  return name.trim().slice(0, 100)
+    .replace(/[<>]/g, '')
+    .replace(/script/gi, '')
+    .replace(/javascript/gi, '')
+    .replace(/on\w+=/gi, '');
+}
+
+function validateCapacity(capacity) {
+  const num = Number(capacity);
+  return Number.isFinite(num) && num > 0 && num <= 100 ? num : null;
+}
 
 const router = express.Router();
 
@@ -47,7 +67,7 @@ function parseCapacityFilter(value, field) {
  * @returns {object} 409 - Truck with number plate already registered
  * @returns {object} 500 - Internal server error
  */
-router.post('/', authenticate, requireRole(['driver']), userLimiter, validateBody(registerTruckSchema), async (req, res) => {
+router.post('/', authenticate, requirePolicy('truck:register'), userLimiter, validateBody(registerTruckSchema), async (req, res) => {
   const { name, number_plate, max_capacity_tons } = req.body;
 
   try {
@@ -99,7 +119,7 @@ router.post('/', authenticate, requireRole(['driver']), userLimiter, validateBod
  * @returns {object} 403 - Forbidden for non-drivers
  * @returns {object} 500 - Internal server error
  */
-router.get('/', authenticate, requireRole(['driver']), userLimiter, async (req, res) => {
+router.get('/', authenticate, requirePolicy('truck:list-own'), userLimiter, async (req, res) => {
   const { name, min_capacity, max_capacity } = req.query;
 
   try {
@@ -251,11 +271,38 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
       logger.warn({ err: mlErr.message }, 'Price prediction unavailable during search, falling back to base pricing');
     }
 
+    let nearbyDriverIds = [];
+    if (mongoDb) {
+      try {
+        const maxDistanceMeters = 50000; // 50km radius
+        const nearbyTelemetry = await mongoDb.collection('telemetry').find({
+          location: {
+            $near: {
+              $geometry: {
+                type: "Point",
+                coordinates: [numPickupLng, numPickupLat]
+              },
+              $maxDistance: maxDistanceMeters
+            }
+          }
+        }).toArray();
+
+        nearbyDriverIds = [...new Set(nearbyTelemetry.map(t => t.driver_id))];
+      } catch (mongoErr) {
+        logger.error('MongoDB telemetry search error:', mongoErr.message);
+      }
+    }
+
+    if (nearbyDriverIds.length === 0) {
+      return res.json([]);
+    }
+
     const { data: drivers, error: driversErr } = await supabase
       .from('driver_details')
       .select('user_id, rating, total_trips, completion_rate, truck_id')
       .eq('is_online', true)
-      .not('truck_id', 'is', null);
+      .not('truck_id', 'is', null)
+      .in('user_id', nearbyDriverIds);
 
     if (driversErr) {
       logger.error('Driver search error:', driversErr.message);
