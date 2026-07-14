@@ -19,55 +19,6 @@ export class LockAcquisitionError extends Error {
  * Acquires a distributed lock using Redis.
  * @param {string} resourceKey - The unique key identifying the resource to lock (e.g. `escrow_lock:123`)
  * @param {number} ttlMs - Time to live in milliseconds
-<<<<<<< fix/redis-lock-failure-handling
- * @returns {Promise<string|null>} lockValue if acquired, null if not acquired or Redis unavailable
- */
-export async function acquireLock(resourceKey, ttlMs = 10000) {
-  if (!redisClient) {
-    logger.warn('[RedisLock] redisClient not available, cannot acquire lock for', resourceKey);
-    return null;
-  }
-
-  const lockValue = crypto.randomUUID();
-
-  try {
-    const acquired = await redisClient.set(resourceKey, lockValue, 'PX', ttlMs, 'NX');
-
-    if (acquired) {
-      return lockValue;
-    }
-    return null;
-  } catch (err) {
-    logger.error({ err }, '[RedisLock] Error acquiring lock for key', resourceKey);
-    return null;
-  }
-}
-
-/**
- * Renews a distributed lock by extending its TTL if still held by this lockValue.
- * @param {string} resourceKey - The unique key identifying the resource
- * @param {string} lockValue - The value returned by acquireLock
- * @param {number} ttlMs - New TTL in milliseconds
- * @returns {Promise<boolean>} true if renewed, false otherwise
- */
-export async function renewLock(resourceKey, lockValue, ttlMs = 10000) {
-  if (!redisClient || !lockValue) return false;
-
-  const luaScript = `
-    if redis.call('GET', KEYS[1]) == ARGV[1] then
-      redis.call('PEXPIRE', KEYS[1], ARGV[2])
-      return 1
-    end
-    return 0
-  `;
-
-  try {
-    const result = await redisClient.eval(luaScript, 1, resourceKey, lockValue, ttlMs.toString());
-    return result === 1;
-  } catch (err) {
-    logger.error({ err }, '[RedisLock] Error renewing lock for key', resourceKey);
-    return false;
-=======
  * @returns {Promise<string|null>} lockValue if acquired, null if failed
  * @throws {Error} if Redis is unavailable — callers MUST catch this and fail closed
  * (e.g. respond with HTTP 503) rather than proceeding without a lock.
@@ -83,7 +34,6 @@ export async function acquireLock(resourceKey, ttlMs = 10000) {
 
   if (acquired) {
     return lockValue;
->>>>>>> main
   }
 }
 
