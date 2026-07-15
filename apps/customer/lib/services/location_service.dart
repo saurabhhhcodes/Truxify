@@ -121,9 +121,13 @@ class LocationService {
   }
 
   String extractCity(String address) {
-    final parts = address.split(',');
-    if (parts.length >= 3) return parts[parts.length - 3].trim();
-    return parts.first.trim();
+    final parts = address
+        .split(',')
+        .map((part) => part.trim())
+        .where((part) => part.isNotEmpty)
+        .toList();
+    if (parts.length >= 3) return parts[parts.length - 3];
+    return parts.isEmpty ? '' : parts.first;
   }
 
   String extractShortAddress(String address) {
