@@ -747,7 +747,7 @@ router.post('/:id/verify-delivery', authenticate, userLimiter, requirePolicy('de
 // 14. RESEND DELIVERY OTP (DRIVER)
 // ============================================================================
 router.post('/:id/resend-otp', authenticate, userLimiter, resendOtpLimiter, requirePolicy('delivery:resend-otp'), validateParams(paramIdSchema), async (req, res) => {
-
+  const { id: orderId } = req.params;
   try {
     const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'id, order_display_id, driver_id, customer_id, status');
     orderValidationService.assertOrderFound(order);
@@ -774,7 +774,7 @@ router.post('/:id/resend-otp', authenticate, userLimiter, resendOtpLimiter, requ
 // 15. CHANGE DROP (CUSTOMER)
 // ============================================================================
 router.put('/:id/change-drop', authenticate, userLimiter, changeDropLimiter, requirePolicy('order:change-drop'), validateParams(paramIdSchema), validateBody(changeDropSchema), async (req, res) => {
-
+  const { id: orderId } = req.params;
   try {
     const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, '*');
     orderValidationService.assertOrderFound(order);
@@ -868,7 +868,7 @@ router.put('/:id/change-drop', authenticate, userLimiter, changeDropLimiter, req
 // 16. CANCEL ORDER AND REFUND ESCROW (CUSTOMER)
 // ============================================================================
 router.post('/:id/cancel', authenticate, userLimiter, requirePolicy('order:cancel'), requireIdempotency(86400), validateParams(paramIdSchema), validateBody(cancelOrderSchema), async (req, res) => {
-
+  const { id: orderId } = req.params;
   try {
     const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, '*');
     orderValidationService.assertOrderFound(order);
