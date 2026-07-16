@@ -127,6 +127,13 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
      * @dev Release payment to driver after GPS geofence + OTP confirmation.
      *      Called by the Truxify backend (owner) after both conditions are met.
      *
+     * CRITICAL SECURITY INVARIANT: This function is restricted to onlyOwner.
+     * Neither the customer nor the driver may call this directly — all
+     * release requests MUST flow through the backend's delivery verification
+     * pipeline (OTP generation, OTP verification, GPS geofence confirmation).
+     * Any upgradeable variant of this contract MUST preserve this onlyOwner
+     * guard to prevent unauthorized fund releases.
+     *
      * Security: nonReentrant + CEI pattern
      *   State is updated (paid=true, amount=0, status=Delivered) BEFORE
      *   adding to pendingWithdrawals so a re-entrant driver contract cannot
