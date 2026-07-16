@@ -87,7 +87,7 @@ export class BidAcceptanceService {
 
     // Guard against silent escrow disable: if buildDepositTx returned
     // null txData (contract not initialised), reject immediately.
-    if (!buildResult?.txData) {
+    if (!depositTx?.txData) {
       this.logger?.error?.('[escrow] Escrow deposit tx could not be built — escrow contract is not reachable or misconfigured.');
       throw new DomainError(502, {
         error: 'Escrow is not configured. Escrow deposit transaction could not be built.',
