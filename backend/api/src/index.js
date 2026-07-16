@@ -28,6 +28,7 @@ import authRoutes from './routes/authRoutes.js'
 import healthRoutes from './routes/healthRoutes.js'
 import adminRoutes from './routes/adminRoutes.js'
 import lookupRoutes from './routes/lookupRoutes.js'
+import webhookRoutes from './routes/webhookRoutes.js'
 
 // ============================================================================
 // 🆕 MULTI-PROVIDER ORACLE & VERIFICATION ROUTES
@@ -40,6 +41,7 @@ import oracleRoutes from './routes/oracleRoutes.js'
 // ============================================================================
 import shardRoutes from './routes/shardRoutes.js'
 import shardManager from './services/sharding/ShardManager.js'
+
 
 // ============================================================================
 // 🆕 WEBRTC P2P MESH NETWORK ROUTES
@@ -150,6 +152,7 @@ if (!process.env.SHARD_NORTH_HOST || !process.env.SHARD_SOUTH_HOST ||
   logger.warn('⚠️ Shard hosts not fully configured. Using localhost defaults.')
 }
 
+
 // ============================================================================
 // 🆕 WEBRTC VALIDATION
 // ============================================================================
@@ -167,6 +170,7 @@ if (!process.env.BEHAVIORAL_ANALYTICS_ENABLED) {
   logger.info('Behavioral analytics enabled by default')
 }
 
+
 // ============================================================================
 // 🆕 ZK-PROOFS VALIDATION
 // ============================================================================
@@ -176,6 +180,7 @@ if (!process.env.KYC_VERIFIER_CONTRACT) {
 if (!process.env.PRIVATE_KEY) {
   logger.warn('⚠️ PRIVATE_KEY not set. Cannot sign ZK proof transactions.')
 }
+
 
 
 // ============================================================================
@@ -193,6 +198,7 @@ if (!process.env.GCP_PROJECT_ID) {
 if (!process.env.ACTIVE_CLOUD) {
   logger.warn('⚠️ ACTIVE_CLOUD not set. Using default: aws')
 }
+
 
 // Validate escrow contract deployment — log warning if validation fails,
 // but don't crash (non-escrow functionality should still work).
@@ -383,6 +389,7 @@ app.get('/api/shard/health', async (req, res) => {
   }
 })
 
+
 // ============================================================================
 // 🆕 WEBRTC P2P MESH NETWORK ROUTES
 // ============================================================================
@@ -416,6 +423,7 @@ app.get('/api/fraud/health', (req, res) => {
   })
 })
 
+
 // ============================================================================
 // 🆕 ZK-PROOFS FOR DRIVER KYC ROUTES
 // ============================================================================
@@ -431,6 +439,7 @@ app.get('/api/zkp/health', (req, res) => {
     timestamp: new Date().toISOString()
   })
 })
+
 
 
 // ============================================================================
@@ -526,15 +535,20 @@ server.listen(PORT, () => {
   logger.info(`🆕 Oracle Service enabled with threshold: ${process.env.ORACLE_CONSENSUS_THRESHOLD || 2}`)
   logger.info(`🆕 Verification endpoints available at /api/verify and /api/oracle`)
   logger.info(`🆕 Geographic Sharding enabled with 4 shards (North, South, East, West)`)
+
   logger.info(`🆕 WebRTC P2P Mesh Network available at ws://localhost:${PORT}/webrtc`)
   logger.info(`🆕 Fraud Detection enabled with threshold: ${process.env.FRAUD_THRESHOLD || 0.7}`)
+
   logger.info(`🆕 ZK-Proof KYC Verification enabled with contract: ${process.env.KYC_VERIFIER_CONTRACT || 'not-deployed'}`)
 
   logger.info(`☁️ Multi-Cloud Disaster Recovery enabled (Active: ${process.env.ACTIVE_CLOUD || 'aws'})`)
 
+
+  logger.info(`☁️ Multi-Cloud Disaster Recovery enabled (Active: ${process.env.ACTIVE_CLOUD || 'aws'})`)
+
   startEscrowRefundReconciliation(orderRepository)
-  startEscrowReleaseReconciliation()
-  startReputationReconciliation()
+  startReputationReconciliation(orderRepository)
+  startDlqWorker()
 })
 
 // ============================================================================
@@ -554,12 +568,13 @@ async function shutdown (signal) {
   }
   shuttingDown = true
 
-  logger.info(`${signal} received — draining connections...`)
+  logger.info('Received shutdown signal, initiating graceful shutdown...');
 
-  // Stop reconciliation timers so no new work starts during the drain.
-  stopEscrowRefundReconciliation()
+  // Stop background workers
   stopEscrowReleaseReconciliation()
+  stopEscrowRefundReconciliation()
   stopReputationReconciliation()
+  stopDlqWorker()
 
   const forceExit = setTimeout(() => {
     logger.error('[shutdown] Timeout exceeded — forcing exit.')
@@ -581,6 +596,12 @@ async function shutdown (signal) {
     await closeLocationServer()
     logger.info('[shutdown] WebSocket resources closed.')
 
+    // 3. Close shard connections
+    await shardManager.closeAllConnections()
+    logger.info('[shutdown] Shard connections closed.')
+
+    // 4. Close database/cache connections
+
     // 3. Close WebRTC signaling server
     await closeWebRTCSignaling()
     logger.info('[shutdown] WebRTC signaling server closed.')
@@ -589,11 +610,16 @@ async function shutdown (signal) {
     await shardManager.closeAllConnections()
     logger.info('[shutdown] Shard connections closed.')
 
+
+    // 5. Close database/cache connections
+
+
     // 5. Close OpenTelemetry tracing
     await tracing.shutdown()
     logger.info('[shutdown] OpenTelemetry tracing shut down.')
 
     // 6. Close database/cache connections
+
     await closeDbConnections()
 
     logger.info('[shutdown] Clean exit.')
