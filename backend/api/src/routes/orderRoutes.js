@@ -355,6 +355,7 @@ router.get('/load-offers', authenticate, userLimiter, async (req, res) => {
 
     if (error) return res.status(500).json({ error: 'Failed to fetch load offers.', details: error.message });
 
+    const cacheKey = `load-offers:${page}:${limit}`;
     if (redisClient) {
       await redisClient.set(cacheKey, JSON.stringify(offers), 'EX', 120).catch(() => {});
     }
@@ -380,6 +381,7 @@ router.get('/load-offers/en-route', authenticate, userLimiter, async (req, res) 
 
     if (error) return res.status(500).json({ error: 'Failed to fetch en-route loads.', details: error.message });
 
+    const cacheKey = `load-offers:${page}:${limit}`;
     if (redisClient) {
       await redisClient.set(cacheKey, JSON.stringify(offers), 'EX', 120).catch(() => {});
     }
