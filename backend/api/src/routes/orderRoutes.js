@@ -872,6 +872,7 @@ router.put('/:id/change-drop', authenticate, userLimiter, changeDropLimiter, req
 // ============================================================================
 router.post('/:id/cancel', authenticate, userLimiter, requirePolicy('order:cancel'), requireIdempotency(86400), validateParams(paramIdSchema), validateBody(cancelOrderSchema), async (req, res) => {
   const { id: orderId } = req.params;
+  const { reason } = req.body;
   try {
     const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, '*');
     orderValidationService.assertOrderFound(order);
