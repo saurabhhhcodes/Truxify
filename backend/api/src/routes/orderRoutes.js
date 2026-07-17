@@ -168,6 +168,10 @@ router.post('/', authenticate, userLimiter, requirePolicy('order:create'), requi
     pickup_address, pickup_lat, pickup_lng,
     drop_address, drop_lat, drop_lng,
     goods_type, weight_tonnes,
+    pickup_date, pickup_time,
+    length_ft, width_ft, height_ft,
+    is_stackable, is_fragile, special_requirements,
+    payment_method_id, upi_id,
   } = req.body;
 
   if (pickup_address && pickup_address.length > 200) {
@@ -188,6 +192,7 @@ router.post('/', authenticate, userLimiter, requirePolicy('order:create'), requi
       dropLat: Number(drop_lat),
       dropLng: Number(drop_lng),
     });
+    let pricing;
     pricing = computeOrderPricing({
       pickupLat:  Number(pickup_lat),
       pickupLng:  Number(pickup_lng),
