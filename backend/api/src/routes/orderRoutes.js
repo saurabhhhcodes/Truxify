@@ -813,13 +813,14 @@ router.post('/:id/cancel', authenticate, userLimiter, requirePolicy('order:cance
           updated_at: attemptAt,
         },
         [
-          { op: 'not', column: 'status', operator: 'in', value: '("delivered","payment_released")' },
+          { op: 'not', column: 'status', operator: 'in', value: '("delivered","payment_released","cancelled")' },
+          { op: 'eq', column: 'escrow_status', value: order.escrow_status },
         ]
       );
 
       if (pendingErr) {
         if (pendingErr.code === 'PGRST116') {
-          return res.status(409).json({ error: 'Order was already delivered or payment released. Cannot cancel.' });
+          return res.status(409).json({ error: 'Order was already delivered, payment released, or cancelled. Cannot cancel.' });
         }
         return res.status(500).json({
           error: 'Failed to place the order into refund reconciliation.',
