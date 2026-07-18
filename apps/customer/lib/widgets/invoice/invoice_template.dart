@@ -1,5 +1,6 @@
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:qr/qr.dart' as qr;
 
 /// Brand colours matching Truxify theme.
 class _InvoiceColors {
@@ -23,6 +24,7 @@ class InvoiceData {
     required this.dropAddress,
     required this.driverName,
     required this.truckNumber,
+    this.driverPhone,
     this.baseFare,
     this.distanceCharge,
     this.tollCharge,
@@ -38,6 +40,7 @@ class InvoiceData {
   final String dropAddress;
   final String driverName;
   final String truckNumber;
+  final String? driverPhone;
   final String? baseFare;
   final String? distanceCharge;
   final String? tollCharge;
@@ -128,15 +131,21 @@ pw.Widget _buildHeader(InvoiceData data) => pw.Column(
 
 // ── Order meta ──────────────────────────────────────────────────────────────
 
-pw.Widget _buildOrderMeta(InvoiceData data) => pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
-      children: [
-        _sectionTitle('Order Details'),
-        pw.SizedBox(height: 8),
-        _twoColumnRow('Order ID', data.orderId),
-        _twoColumnRow('Date', data.date),
-      ],
-    );
+pw.Widget _buildOrderMeta(InvoiceData data) {
+  final now = DateTime.now();
+  final generatedDate = '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year}';
+
+  return pw.Column(
+    crossAxisAlignment: pw.CrossAxisAlignment.start,
+    children: [
+      _sectionTitle('Order Details'),
+      pw.SizedBox(height: 8),
+      _twoColumnRow('Order ID', data.orderId),
+      _twoColumnRow('Order Date', data.date),
+      _twoColumnRow('Invoice Date', generatedDate),
+    ],
+  );
+}
 
 // ── Route ───────────────────────────────────────────────────────────────────
 
@@ -160,6 +169,8 @@ pw.Widget _buildDriverSection(InvoiceData data) => pw.Column(
         pw.SizedBox(height: 8),
         _twoColumnRow('Name', data.driverName),
         _twoColumnRow('Vehicle', data.truckNumber),
+        if (data.driverPhone != null && data.driverPhone!.isNotEmpty)
+          _twoColumnRow('Phone', data.driverPhone!),
       ],
     );
 
@@ -208,30 +219,76 @@ pw.Widget _buildBlockchainSection(InvoiceData data) => pw.Column(
             color: _InvoiceColors.accentLight,
             borderRadius: pw.BorderRadius.circular(8),
           ),
-          child: pw.Column(
+          child: pw.Row(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
-              pw.Text(
-                'Transaction Hash',
-                style: pw.TextStyle(
-                  fontSize: 9,
-                  fontWeight: pw.FontWeight.bold,
-                  color: _InvoiceColors.accentDark,
+              pw.Expanded(
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text(
+                      'Transaction Hash',
+                      style: pw.TextStyle(
+                        fontSize: 9,
+                        fontWeight: pw.FontWeight.bold,
+                        color: _InvoiceColors.accentDark,
+                      ),
+                    ),
+                    pw.SizedBox(height: 4),
+                    pw.Text(
+                      data.blockchainTxHash!,
+                      style: pw.TextStyle(
+                        fontSize: 8,
+                        color: _InvoiceColors.primaryText,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              pw.SizedBox(height: 4),
-              pw.Text(
-                data.blockchainTxHash!,
-                style: pw.TextStyle(
-                  fontSize: 8,
-                  color: _InvoiceColors.primaryText,
-                ),
-              ),
+              pw.SizedBox(width: 12),
+              _buildQrCode(data.blockchainTxHash!),
             ],
           ),
         ),
       ],
     );
+
+pw.Widget _buildQrCode(String data) {
+  final qrCode = qr.QrCode.fromData(
+    data: data,
+    errorCorrectLevel: qr.QrErrorCorrectLevel.M,
+  );
+  final qrImage = qr.QrImage(qrCode);
+  final moduleCount = qrImage.moduleCount;
+  const size = 64.0;
+  final moduleSize = size / moduleCount;
+
+  final modules = <pw.Widget>[];
+  for (var row = 0; row < moduleCount; row++) {
+    final cells = <pw.Widget>[];
+    for (var col = 0; col < moduleCount; col++) {
+      final isDark = qrImage.isDark(row, col);
+      cells.add(
+        pw.Container(
+          width: moduleSize,
+          height: moduleSize,
+          color: isDark ? _InvoiceColors.primaryText : _InvoiceColors.white,
+        ),
+      );
+    }
+    modules.add(pw.Row(mainAxisSize: pw.MainAxisSize.min, children: cells));
+  }
+
+  return pw.Container(
+    width: size,
+    height: size,
+    decoration: pw.BoxDecoration(
+      color: _InvoiceColors.white,
+      border: pw.Border.all(color: _InvoiceColors.divider, width: 0.5),
+    ),
+    child: pw.Column(mainAxisSize: pw.MainAxisSize.min, children: modules),
+  );
+}
 
 // ── Footer ──────────────────────────────────────────────────────────────────
 

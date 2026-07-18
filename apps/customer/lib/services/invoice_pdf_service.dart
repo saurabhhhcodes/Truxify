@@ -45,6 +45,7 @@ class InvoicePdfService {
       dropAddress: drop,
       driverName: order.driver,
       truckNumber: order.truckNumber,
+      driverPhone: order.driverPhone,
       baseFare: order.baseFare,
       distanceCharge: order.distanceCharge,
       tollCharge: order.tollCharge,

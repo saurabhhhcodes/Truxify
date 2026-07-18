@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../constants/supabase_config.dart';
 import '../controllers/app_controller.dart';
+import '../l10n/app_localizations.dart';
 import '../models/app_models.dart';
 import '../services/invoice_pdf_service.dart';
 import '../services/order_service.dart';
@@ -148,6 +149,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             distanceCharge: _formatRupeesFromPaise(orderMap['distance_charge']),
             tollCharge: _formatRupeesFromPaise(orderMap['toll_charge']),
             platformFee: _formatRupeesFromPaise(orderMap['platform_fee']),
+            driverPhone: orderMap['driver_phone']?.toString() ??
+                (orderMap['profiles'] is Map<String, dynamic>
+                    ? orderMap['profiles']['phone']?.toString()
+                    : null),
           );
           // Trigger rating flow if status becomes completed and rating dialog hasn't been shown yet
           final orderStatus = orderMap['status']?.toString() ?? '';
@@ -403,7 +408,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       if (trackingUrl == null || trackingUrl.isEmpty) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to generate tracking link')),
+          SnackBar(content: Text(AppLocalizations.of(context)!.unableToShare)),
         );
         return;
       }
@@ -412,6 +417,15 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       await Share.share(
         'Track your shipment on Truxify:\n$trackingUrl',
         subject: 'Shipment Tracking - ${_currentOrder.orderId}',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${AppLocalizations.of(context)!.unableToShare}: $e')),
+      );
+    }
+  }
+
   Future<void> _generateInvoice() async {
     if (_isGeneratingInvoice) return;
 
@@ -421,18 +435,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       await InvoicePdfService.printOrShareInvoice(_currentOrder);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Invoice ready'),
+        SnackBar(
+          content: Text(AppLocalizations.of(context)!.invoiceReady),
           backgroundColor: TruxifyColors.success,
         ),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Unable to share: $e')),
-      );
         SnackBar(
-          content: Text('Failed to generate invoice: $e'),
+          content: Text('${AppLocalizations.of(context)!.downloadFailed}: $e'),
           backgroundColor: TruxifyColors.error,
         ),
       );
@@ -449,8 +461,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       appBar: AppBar(
         title: const Text('Order Details'),
         leading: IconButton(onPressed: () => Navigator.of(context).pop(), icon: const Icon(Icons.arrow_back_rounded)),
-        actions: [IconButton(onPressed: _shareTracking, icon: const Icon(Icons.share_rounded))],
         actions: [
+          IconButton(onPressed: _shareTracking, icon: const Icon(Icons.share_rounded)),
           if (_isGeneratingInvoice)
             const Padding(
               padding: EdgeInsets.all(12),

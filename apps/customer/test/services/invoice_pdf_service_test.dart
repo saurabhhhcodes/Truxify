@@ -14,8 +14,9 @@ HistoryOrderData _buildTestOrder({
   String? distanceCharge = 'Rs 200',
   String? tollCharge = 'Rs 50',
   String? platformFee = 'Rs 30',
+  String? driverPhone = '+91 98765 43210',
 }) {
-  return const HistoryOrderData(
+  return HistoryOrderData(
     orderId: orderId,
     route: 'Mumbai → Delhi',
     date: '2026-07-15',
@@ -23,12 +24,13 @@ HistoryOrderData _buildTestOrder({
     status: 'Delivered',
     driver: 'Rajesh Kumar',
     truckNumber: 'MH-12-AB-1234',
-    timeline: [],
+    timeline: const [],
     blockchainTxHash: blockchainTxHash,
     baseFare: baseFare,
     distanceCharge: distanceCharge,
     tollCharge: tollCharge,
     platformFee: platformFee,
+    driverPhone: driverPhone,
   );
 }
 
@@ -75,6 +77,15 @@ void main() {
       final header = String.fromCharCodes(bytes.take(5));
       expect(header, equals('%PDF-'));
     });
+
+    test('handles order with null driver phone', () async {
+      final order = _buildTestOrder(driverPhone: null);
+      final bytes = await InvoicePdfService.generatePdfBytes(order);
+
+      expect(bytes, isNotEmpty);
+      final header = String.fromCharCodes(bytes.take(5));
+      expect(header, equals('%PDF-'));
+    });
   });
 
   group('Invoice template', () {
@@ -87,6 +98,7 @@ void main() {
         dropAddress: 'Nagpur',
         driverName: 'Test Driver',
         truckNumber: 'MH-01-XX-0000',
+        driverPhone: '+91 12345 67890',
         baseFare: 'Rs 400',
         distanceCharge: 'Rs 150',
         tollCharge: 'Rs 25',
@@ -100,7 +112,7 @@ void main() {
       expect(doc.document, isNotNull);
     });
 
-    test('PDF content contains order ID', () {
+    test('PDF content contains order ID and driver phone', () {
       final data = InvoiceData(
         orderId: 'ORD-7777',
         date: '2026-01-01',
@@ -109,6 +121,7 @@ void main() {
         dropAddress: 'Bangalore',
         driverName: 'Kumar',
         truckNumber: 'TN-01-AA-1111',
+        driverPhone: '+91 99999 11111',
         total: 'Rs 1000',
       );
 
@@ -121,6 +134,68 @@ void main() {
       expect(content, contains('Bangalore'));
       expect(content, contains('Kumar'));
       expect(content, contains('TN-01-AA-1111'));
+      expect(content, contains('+91 99999 11111'));
+    });
+
+    test('PDF content contains blockchain hash when provided', () {
+      final data = InvoiceData(
+        orderId: 'ORD-5555',
+        date: '2026-03-20',
+        status: 'Delivered',
+        pickupAddress: 'Mumbai',
+        dropAddress: 'Pune',
+        driverName: 'Singh',
+        truckNumber: 'MH-12-BB-2222',
+        total: 'Rs 800',
+        blockchainTxHash: '0xabcdef1234567890',
+      );
+
+      final doc = buildInvoicePdf(data);
+      final bytes = doc.save();
+      final content = utf8.decode(bytes);
+
+      expect(content, contains('Blockchain Verification'));
+      expect(content, contains('0xabcdef1234567890'));
+    });
+
+    test('PDF omits blockchain section when hash is null', () {
+      final data = InvoiceData(
+        orderId: 'ORD-4444',
+        date: '2026-04-10',
+        status: 'Delivered',
+        pickupAddress: 'Delhi',
+        dropAddress: 'Jaipur',
+        driverName: 'Verma',
+        truckNumber: 'DL-01-CC-3333',
+        total: 'Rs 600',
+        blockchainTxHash: null,
+      );
+
+      final doc = buildInvoicePdf(data);
+      final bytes = doc.save();
+      final content = utf8.decode(bytes);
+
+      expect(content, isNot(contains('Blockchain Verification')));
+    });
+
+    test('PDF omits driver phone section when null', () {
+      final data = InvoiceData(
+        orderId: 'ORD-3333',
+        date: '2026-05-05',
+        status: 'Delivered',
+        pickupAddress: 'Kolkata',
+        dropAddress: 'Patna',
+        driverName: 'Das',
+        truckNumber: 'WB-01-DD-4444',
+        total: 'Rs 500',
+        driverPhone: null,
+      );
+
+      final doc = buildInvoicePdf(data);
+      final bytes = doc.save();
+      final content = utf8.decode(bytes);
+
+      expect(content, isNot(contains('Phone')));
     });
   });
 }
