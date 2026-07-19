@@ -1,6 +1,6 @@
 'use strict';
 
-const difficultyLabels = ['Beginner', 'Intermediate', 'Advanced', 'Critical'];
+const difficultyLabels = ['level:beginner', 'level:intermediate', 'level:advanced', 'level:critical'];
 const difficultyLabelsLower = difficultyLabels.map(d => d.toLowerCase());
 
 function checkLabels(currentLabels) {
@@ -16,13 +16,13 @@ function checkLabels(currentLabels) {
   const hasDifficulty = currentLabelsLower.some(l => {
     if (difficultyLabelsLower.includes(l)) return true;
     for (const diff of difficultyLabelsLower) {
-      if (l.includes(diff)) return true;
+      if (l.includes(diff) || diff.includes(l)) return true;
     }
     return false;
   });
 
   if (!hasDifficulty) {
-    labelsToAdd.push('Beginner');
+    labelsToAdd.push('level:beginner');
   }
 
   return labelsToAdd;
@@ -67,9 +67,9 @@ async function run({ github, context, core, dryRun = false }) {
     }
   }
 
-  // Ensure gssoc:approved and Beginner exist
+  // Ensure gssoc:approved and level:beginner exist
   await ensureLabelExists('gssoc:approved', '0052cc', 'GSSoC approved contribution');
-  await ensureLabelExists('Beginner', '0e8a16', 'Beginner level task/PR');
+  await ensureLabelExists('level:beginner', '0e8a16', 'Beginner level task/PR');
 
   // Fetch all closed pull requests
   core.info('Fetching closed pull requests...');
@@ -84,6 +84,19 @@ async function run({ github, context, core, dryRun = false }) {
 
   let updatedCount = 0;
   for (const pr of pullRequests) {
+    // Skip if not merged (closed without merge)
+    if (!pr.merged_at) {
+      core.info(`PR #${pr.number}: Skipped because it was closed without merging.`);
+      continue;
+    }
+
+    // Skip if authored by dependabot
+    const author = pr.user ? pr.user.login.toLowerCase() : '';
+    if (author.includes('dependabot')) {
+      core.info(`PR #${pr.number}: Skipped because it was created by Dependabot.`);
+      continue;
+    }
+
     const currentLabels = (pr.labels || []).map(l => typeof l === 'string' ? l : l.name);
     const labelsToAdd = checkLabels(currentLabels);
 
