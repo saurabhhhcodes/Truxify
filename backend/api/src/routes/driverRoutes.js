@@ -1009,6 +1009,20 @@ router.get('/:driverId/reputation', authenticate, userLimiter, requirePolicy('dr
   }
 });
 
+
+router.get('/weigh-stations/bypass-status', requireAuth, requireDriver, async (req, res) => {
+  try {
+    const driverId = req.user.id;
+    const lat = parseFloat(req.query.lat);
+    const lng = parseFloat(req.query.lng);
+    const status = await checkBypassEligibility(driverId, lat, lng);
+    return res.status(200).json(status);
+  } catch (err) {
+    logger.error(`[weigh-station] Error getting bypass status for driver ${req.user.id}: ${err.message}`);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 export default router;
 
 // Resolves #2051: Composite indexes added for 2dsphere queries
