@@ -41,11 +41,16 @@ class BackgroundSyncService {
     if (pendingPods.isEmpty) return;
 
     String? token;
-    final firebaseUser = FirebaseAuth.instance.currentUser;
-    if (firebaseUser != null) {
-      token = await firebaseUser.getIdToken();
-    } else {
-      token = Supabase.instance.client.auth.currentSession?.accessToken;
+    try {
+      final firebaseUser = FirebaseAuth.instance.currentUser;
+      if (firebaseUser != null) {
+        token = await firebaseUser.getIdToken();
+      } else {
+        token = Supabase.instance.client.auth.currentSession?.accessToken;
+      }
+    } catch (_) {
+      // Firebase/Supabase not initialized in background isolate.
+      // Token should be persisted to SharedPreferences for background sync.
     }
 
     if (token == null) return; // Cannot sync without auth
