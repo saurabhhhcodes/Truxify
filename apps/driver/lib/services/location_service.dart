@@ -87,6 +87,8 @@ class LocationService {
     _maxIntervalTimer = null;
     _lastSentPosition = null;
     _lastTriggeredMilestone = null;
+    _activeOrderId = null;
+    _activeOrderDisplayId = null;
     _closeWebSocket();
   }
 
@@ -399,7 +401,5 @@ class LocationService {
     }
     _channel?.sink.close();
     _channel = null;
-    _activeOrderId = null;
-    _activeOrderDisplayId = null;
   }
 }
