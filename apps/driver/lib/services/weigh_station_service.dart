@@ -17,10 +17,11 @@ class WeighStationEvent {
 }
 
 class WeighStationService {
-  WeighStationService._privateConstructor();
-  static final WeighStationService instance = WeighStationService._privateConstructor();
+  WeighStationService._({String? apiBaseUrl}) : _apiClient = ApiClient(baseUrl: apiBaseUrl);
 
-  final ApiClient _apiClient = ApiClient();
+  static final WeighStationService instance = WeighStationService._();
+
+  final ApiClient _apiClient;
   final _eventController = StreamController<WeighStationEvent>.broadcast();
   StreamSubscription<Position>? _locationSub;
 
