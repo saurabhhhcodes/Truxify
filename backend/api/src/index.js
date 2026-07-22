@@ -628,16 +628,9 @@ async function shutdown (signal) {
     await shardManager.closeAllConnections()
     logger.info('[shutdown] Shard connections closed.')
 
-    // 4. Close database/cache connections
-
-    // 3. Close WebRTC signaling server
+    // 4. Close WebRTC signaling server
     await closeWebRTCSignaling()
     logger.info('[shutdown] WebRTC signaling server closed.')
-
-    // 4. Close shard connections
-    await shardManager.closeAllConnections()
-    logger.info('[shutdown] Shard connections closed.')
-
 
     // 5. Close database/cache connections
 
